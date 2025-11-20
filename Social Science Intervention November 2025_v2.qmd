@@ -1,0 +1,5500 @@
+---
+title: "Daily Analysis Report – Personalized ANC Whatsapp Message Reminder"
+author: "Risyad Abiyyu Siregar"
+date: "`r format(Sys.time(), '%A, %d %B %Y, %H:%M %Z')`"
+
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    toc-expand: true
+    toc-title: "Table of Contents"
+    number-sections: true
+    smooth-scroll: true
+    code-fold: true
+    code-summary: "Show code"
+    embed-resources: true
+    page-layout: sidebar
+
+execute:
+  echo: false
+  cache: false
+  warning: false
+  message: false
+
+project: 
+  title: "Scalable Public Health Empowerment, Resilience and Education Sites (SPHERES)"
+  location: "Purbalingga and West Lombok, INDONESIA"
+  principal-investigator: "Anuraj Shankar"
+  contributors: |
+    Jesslyn Audrey Virginia (Whatsapp API, Cohort);  
+    Muhammad Zaifullah (Qisqus Report);  
+    Faris Rizky Andika (Encounter data [BigQuery]);  
+    Ris Heskiel Najogi Sitinjak, Dilla Rosa (Social Science Team)
+
+resources:
+  - logo_oucru.png
+  - logo_spheres.png
+
+editor: visual
+---
+
+```{=html}
+<div style="display: flex; justify-content: center; align-items: center; gap: 60px; margin: 20px 0;">
+  <img src="logo_oucru.png" alt="OUCRU Logo" style="height: 180px; max-width: 360px; object-fit: contain;">
+  <img src="logo_spheres.png" alt="SPHERES Logo" style="height: 180px; max-width: 360px; object-fit: contain;">
+</div>
+```
+
+```{r metadata_block, echo=FALSE, results='asis'}
+library(digest)
+# Analysis time
+current_time <- format(
+  as.POSIXct(Sys.time(), tz = "Asia/Jakarta"),
+  "%A, %d %B %Y, %H:%M:%S GMT+7"
+)
+
+# Report version hash
+report_file <- knitr::current_input()
+if (is.null(report_file)) {
+  report_file <- rstudioapi::getActiveDocumentContext()$path
+}
+report_hash <- digest::digest(file = report_file, algo = "sha1")
+short_hash <- substr(report_hash, 1, 6)
+report_version <- paste0("1.0-", short_hash)
+
+cat(glue::glue("
+<div style='font-size:16px; color:#555; margin-bottom:10px;'>
+  <b>Analysis run time:</b> {current_time}
+<div style='font-size:16px; color:#555; margin-bottom:20px;'>
+  <b>Report version:</b> {report_version}
+</div>
+"))
+
+```
+
+::: {style="
+margin-top:10px; margin-bottom:25px; padding:12px 16px; border-left:4px solid #5bc0de; background-color:#f8f9fa; font-size:15px; line-height:1.5; "} <b>Project:</b> Scalable Public Health Empowerment, Resilience and Education Sites (SPHERES)<br> <b>Location:</b> Purbalingga and West Lombok, INDONESIA<br> <b>Principal Investigator:</b> Anuraj Shankar<br> <b>Acknowledgements:</b><br> Jesslyn Audrey Virginia (Whatsapp API, Cohort);\
+Hamidah Mulyani, Muhammad Zaifullah (Qisqus Report);\
+Faris Rizky Andika (Encounter data/BigQuery);\
+Dilla Rosa, Nisa Sri Wahyuni (Social Science Team)
+:::
+
+# Introduction and Context
+
+This is the report of current ongoing social science intervention of SPHERES: **personalized Whatsapp messages for Antenatal Care visit reminders among pregnant women in Purbalingga and West Lombok.**
+
+## Objective
+
+To monitor engagement patterns and service utilization trends of Antenatal Care (AND) daily.
+
+## Research Question
+
+How is the performance of personalized WA messages compared to generic WA template in terms of user engagements and real outcomes (antenatal care visit)?
+
+## Working Hypotheses
+
+-   Personalized messages (that are tailored and piloted to suit the target populations) generates better engagement rates (read rates, reply rates) compared to generic WA messages.
+
+-   Personalized messages (with better engagement) results in better ANC visit compliance (measured by recorded ANC visits) compared to those who receive only generic WA messages.
+
+## Other sources
+
+-   [Personalized WA Intervention - Working Protocol](https://oucruaap-my.sharepoint.com/:p:/g/personal/rsiregar_oucru_org/ERUC5PL7gFRFtPErqp8256YB2hV2THuPrf3gckCAP9OjLg?e=Kwo3Tn)
+
+-   [Social Science Intervention - Complete Protocol (.docx)](https://oucruaap.sharepoint.com/:w:/s/msteams_772d3f/ESIqSSPqfBtAkL-D07FX5zEBWEuDyvVO0j9tpAygzgHDsA?e=IuOdaV)
+
+# Setup Prerequisites
+
+## Loading Packages
+
+All packages are loaded here.
+
+```{r, include = FALSE}
+# List of required packages
+packages <- c(
+  "tidyverse", "janitor", "DT", "ggpubr", "psych", 
+  "irr", "broom", "ggcorrplot", "readxl", "networkD3", 
+  "htmlwidgets", "ggalluvial", "lubridate", "gt", 
+  "skimr", "zoo", "here", "bigrquery", "glue"
+)
+
+# Install missing packages
+installed <- rownames(installed.packages())
+to_install <- setdiff(packages, installed)
+if (length(to_install) > 0) {
+  install.packages(to_install, dependencies = TRUE)
+}
+
+# Load packages quietly without printing lapply output
+suppressPackageStartupMessages({
+  invisible(lapply(packages, library, character.only = TRUE))
+})
+
+# Set knitr defaults
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+```{r show_packages, echo = FALSE, message = FALSE, warning = FALSE}
+
+cat("### 📦 Packages Loaded Successfully\n\n")
+for (pkg in packages) {
+  version <- as.character(packageVersion(pkg))
+  cat(paste0("- **", pkg, "** (v", version, ")\n"))
+}
+```
+## Setting Up Work Directory
+
+Change this if this code is wanted to be run on another computer.
+
+```{r, echo = FALSE}
+getwd()
+setwd("C:/Users/user/OneDrive - Oxford University Clinical Research Unit/Data/Whatsapp Reminder")
+```
+
+## Setting up BigQuery (using bigrquery package)
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+# This opens your browser for login
+bq_auth()
+
+
+# Set your project information
+project_id_pbg <- "stellar-orb-451904-d9" # Purbalingga
+project_id_lbr <- "spheres-lombok-barat" # Lombok Barat
+```
+
+### Define SQL Queries (for encounter data)
+
+```{r, echo=TRUE, eval=TRUE}
+#| code-fold: true
+#| code-summary: "Show SQL Query"
+q_pbg <- glue("SELECT distinct * FROM `stellar-orb-451904-d9.dashboard.kunjungan_ibu_hamil_new`
+ ")
+
+q_lbr <- glue("SELECT distinct * FROM `spheres-lombok-barat.dashboard.kunjungan_ibu_hamil_new`")
+```
+
+### Running the BigQuery
+
+```{r}
+job_lbr <- bq_project_query(
+  x = project_id_lbr,        # project_id string
+  query = q_lbr,         # your SQL query
+  location = "asia-southeast2"
+)
+
+job_pbg <- bq_project_query(
+  x = project_id_pbg,        # project_id string
+  query = q_pbg,         # your SQL query
+  location = "asia-southeast2"
+)
+```
+
+## Setting up color palette (for visualization)
+
+```{r}
+# ==============================
+# ANC REPORT COLOR SYSTEM
+# ==============================
+
+# --- Main color palette ---
+my_palette <- c(
+  "turmeric"    = "#E6B800",  # muted amber highlight
+  "dark_purple" = "#6E5A8C",  # intellectual tone
+  "aquamarine"  = "#66C5CC",  # calm blue-green
+  "muted_teal"  = "#4C8C8A",  # balanced neutral
+  "warm_gray"   = "#C7BEBE",  # subtle contrast
+  "deep_slate"  = "#2C2C34"   # for text, strong accent
+)
+
+# --- Neutral pastel palette (for secondary charts or backgrounds) ---
+neutral_palette <- c("#F4EAD5", "#D7CCC8", "#B0BEC5", "#90A4AE", "#78909C")
+
+# ==============================
+# PALETTE FUNCTIONS
+# ==============================
+
+# Retrieve the ANC palette as a vector of hex colors
+ss_pal <- function(palette = c("main", "neutral"), reverse = FALSE) {
+  palette <- match.arg(palette)
+  pal <- if (palette == "main") my_palette else neutral_palette
+  if (reverse) pal <- rev(pal)
+  pal
+}
+
+# Color scale for discrete variables
+scale_color <- function(palette = "main", reverse = FALSE, ...) {
+  pal <- ss_pal(palette, reverse)
+  ggplot2::scale_color_manual(values = pal, ...)
+}
+
+# Fill scale for discrete variables
+scale_fill <- function(palette = "main", reverse = FALSE, ...) {
+  pal <- ss_pal(palette, reverse)
+  ggplot2::scale_fill_manual(values = pal, ...)
+}
+
+# Gradient fill for continuous variables (uses first & last palette colors)
+scale_fill_continuous <- function(palette = "main", reverse = FALSE, ...) {
+  pal <- ss_pal(palette, reverse)
+  ggplot2::scale_fill_gradientn(colors = pal, ...)
+}
+
+# ==============================
+# THEME FUNCTION
+# ==============================
+
+theme_ss_report <- function(base_size = 12, base_family = "") {
+  ggplot2::theme_minimal(base_size = base_size, base_family = base_family) +
+    ggplot2::theme(
+      text = ggplot2::element_text(color = my_palette["deep_slate"]),
+      plot.title = ggplot2::element_text(
+        face = "bold", hjust = 0.5, size = base_size + 1, color = my_palette["dark_purple"]
+      ),
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0.5, size = base_size - 1, color = my_palette["muted_teal"]
+      ),
+      axis.title = ggplot2::element_text(face = "bold"),
+      axis.text = ggplot2::element_text(color = my_palette["deep_slate"]),
+      panel.grid.major = ggplot2::element_line(color = "#EAEAEA"),
+      panel.grid.minor = ggplot2::element_blank(),
+      plot.background = ggplot2::element_rect(fill = "white", color = NA),
+      legend.title = ggplot2::element_text(face = "bold"),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      plot.margin = ggplot2::margin(10, 10, 10, 10)
+    )
+}
+
+```
+
+# Data Acquisition
+
+## Data Ingestion
+
+### Qisqus Report (message)
+
+```{r}
+# --- Qisqus Report Loader ---
+
+# 1. Define folder path
+folder_path <- "Qisqus"
+
+# 2. Today's date string
+today_str <- format(Sys.Date(), "%Y-%m-%d")
+
+# 3. List all Excel or CSV files
+files <- list.files(
+  folder_path,
+  pattern = "\\.(xlsx|xls|csv)$",
+  ignore.case = TRUE,
+  full.names = TRUE
+)
+
+# 4. Extract YYYY-MM-DD from filenames
+file_dates <- stringr::str_extract(files, "\\d{4}-\\d{2}-\\d{2}")
+
+# 5. Convert to Date
+valid_dates <- suppressWarnings(as.Date(file_dates, format = "%Y-%m-%d"))
+
+# 6. Combine into dataframe
+file_info <- data.frame(file = files, date = valid_dates)
+
+# 7. Keep valid-date files only
+file_info <- file_info[!is.na(file_info$date), ]
+
+# 8. Try to match today's file
+today_file <- file_info$file[file_info$date == as.Date(today_str)]
+
+# 9. If none, use most recent file
+if (length(today_file) == 0) {
+  latest_date <- max(file_info$date)
+  today_file <- file_info$file[file_info$date == latest_date]
+  message(paste("⚠️ Today's file not found. Using latest available file from:", latest_date))
+} else {
+  message(paste("✅ Found today's file:", today_str))
+}
+
+# 10. If multiple files for same date, pick the most recently modified
+if (length(today_file) > 1) {
+  file_mtime <- file.info(today_file)$mtime
+  today_file <- today_file[which.max(file_mtime)]
+  message("ℹ️ Multiple files found — using most recently modified.")
+}
+
+# 11. Safety check
+if (length(today_file) == 0) {
+  stop("❌ No valid report files found in the folder.")
+}
+
+# 12. Read file based on extension
+ext <- tools::file_ext(today_file)
+
+if (tolower(ext) %in% c("xlsx", "xls")) {
+  df <- readxl::read_excel(today_file, sheet = 1)
+} else if (tolower(ext) == "csv") {
+  df <- readr::read_csv(today_file, show_col_types = FALSE)
+} else {
+  stop("❌ Unsupported file type: ", ext)
+}
+
+# 13. Print confirmation
+cat("✅ Successfully imported:", basename(today_file), "\n")
+
+```
+
+### ANC Encounter dataset (from BigQuery)
+
+```{r}
+enc_pbg <- bq_table_download(job_pbg)
+enc_lbr <- bq_table_download(job_lbr)
+
+# adding 'kabupaten' variable to mark between sites
+enc_pbg <- enc_pbg %>% mutate(kabupaten = "purbalingga")
+enc_lbr <- enc_lbr %>% mutate(kabupaten = "lombok barat")
+
+## Merging enc_lbr and enc_pbg into one 'encounter' dataset
+enc_raw <- bind_rows(
+  enc_lbr %>% mutate(across(everything(), as.character)),
+  enc_pbg %>% mutate(across(everything(), as.character))
+)
+
+```
+
+### Cohort dataset (preexported and randomized)
+
+Source: BigQuery
+
+```{r}
+## --- Purbalingga datasets ---
+pbg_raw <- read_xlsx("social_science_nov_2025.xlsx", sheet = "pbg_clean")
+lbr_raw <- read_xlsx("social_science_nov_2025.xlsx", sheet = "lobar_clean")
+```
+
+### Codebook for each variables
+```{r}
+# Summon Dictionary and Codebooks for respective datasets
+# Define the Excel file
+dict_file <- "SPHERES Social Science Data Dictionary.xlsx"
+
+# Read each sheet into a separate data frame
+cb_enc   <- read_excel(dict_file, sheet = "enc")
+cb_pbg   <- read_excel(dict_file, sheet = "pbg")
+cb_lbr <- read_excel(dict_file, sheet = "lbr")
+cb_qisqus <- read_excel(dict_file, sheet = "qisqus")
+
+```
+
+## Data cleaning
+### 0. Duplicate
+
+```{r}
+enc <- enc_raw
+pbg <- pbg_raw
+lbr <- lbr_raw
+qisqus <- df
+```
+
+### 1. Inspect
+
+1.  enc
+
+```{r}
+skim(enc)
+```
+
+2.  pbg_raw
+
+```{r}
+skim(pbg_raw)
+```
+
+3.  lbr_raw
+
+```{r}
+skim(lbr_raw)
+```
+
+4.  qisqus
+
+```{r}
+skim(qisqus)
+```
+
+5.  codebooks
+
+```{r}
+skim(cb_enc)
+skim(cb_pbg)
+skim(cb_lbr)
+skim(cb_qisqus)
+```
+
+### 2. Convert
+
+#### Encounter
+
+```{r}
+## identify common column names
+common_cols <- intersect(names(enc), cb_enc$old_var)
+
+# renaming variable names according to the ones in the dictionary
+enc <- enc %>%
+  rename_with(
+    ~ cb_enc$new_var[match(., cb_enc$old_var)],
+    .cols = all_of(common_cols)
+  )
+
+# changing variables types (according to the dictionary)
+for (i in seq_len(nrow(cb_enc))) {
+  var <- cb_enc$new_var[i]
+  type <- cb_enc$var_type[i]
+  
+  if (var %in% names(enc)) {
+    enc[[var]] <- switch(
+      type,
+      "chr" = as.character(enc[[var]]),
+      "factor"    = as.factor(enc[[var]]),
+      "num"   = as.numeric(enc[[var]]),
+      "int"   = as.integer(enc[[var]]),
+      "date"      = as.Date(enc[[var]]),
+      enc[[var]]  # fallback: unchanged
+    )
+  }
+}
+```
+
+##### [NOT RUN] Changing mixed variables (sys, dia, fhr, tfu)
+
+```{r, eval = FALSE}
+## Systolic Blood Pressure
+enc <- enc %>%
+  mutate(
+    # Clean text
+    bp_sys_clean = bp_sys %>%
+      as.character() %>%
+      str_trim() %>%
+      str_squish() %>%
+      str_to_lower(),
+
+    # Extract numeric values (only digits)
+    bp_sys_num = suppressWarnings(as.numeric(bp_sys_clean)),
+
+    # Keep numeric values in bp_sys (set others to NA)
+    bp_sys = if_else(!is.na(bp_sys_num), bp_sys_num, NA_real_),
+
+    # Logical validity check
+    bp_sys_valid = !is.na(bp_sys) & bp_sys > 0,
+
+    # Combine categorical logic
+    bp_sys_cat = case_when(
+      # --- Text-based categories ---
+      str_detect(bp_sys_clean, "normal") ~ "normotensive",
+      str_detect(bp_sys_clean, "hyper") ~ "hypertensive",
+      str_detect(bp_sys_clean, "hypo") ~ "hypotensive",
+
+      # --- Numeric-based classification ---
+      !is.na(bp_sys) & bp_sys < 90 ~ "hypotensive",
+      !is.na(bp_sys) & bp_sys >= 90 & bp_sys <= 140 ~ "normotensive",
+      !is.na(bp_sys) & bp_sys > 140 ~ "hypertensive",
+
+      # --- Everything else ---
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(-bp_sys_num)  # optional cleanup
+
+## Diastolic blood pressure
+enc <- enc %>%
+  mutate(
+    # Clean text
+    bp_dia_clean = bp_dia %>%
+      as.character() %>%
+      str_trim() %>%
+      str_squish() %>%
+      str_to_lower(),
+
+    # Extract numeric values (only digits)
+    bp_dia_num = suppressWarnings(as.numeric(bp_dia_clean)),
+
+    # Keep numeric values in bp_sys (set others to NA)
+    bp_dia = if_else(!is.na(bp_dia_num), bp_dia_num, NA_real_),
+
+    # Logical validity check
+    bp_dia_valid = !is.na(bp_dia) & bp_dia > 0,
+
+    # Combine categorical logic
+    bp_dia_cat = case_when(
+      # --- Text-based categories ---
+      str_detect(bp_dia_clean, "normal") ~ "normotensive",
+      str_detect(bp_dia_clean, "hyper") ~ "hypertensive",
+      str_detect(bp_dia_clean, "hypo") ~ "hypotensive",
+
+      # --- Numeric-based classification ---
+      !is.na(bp_dia) & bp_dia < 60 ~ "hypotensive",
+      !is.na(bp_dia) & bp_dia >= 60 & bp_dia <= 90 ~ "normotensive",
+      !is.na(bp_dia) & bp_dia > 90 ~ "hypertensive",
+
+      # --- Everything else ---
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(-bp_dia_num)  # optional cleanup
+
+enc <- enc %>%
+  mutate(
+    # Keep the original fundal_height text for mapping
+    fundal_height_orig = fundal_height,
+    # 1️⃣ Convert to numeric (overwriting original variable)
+    fundal_height = parse_number(fundal_height),
+
+    # 2️⃣ Create categorical classification
+    fundal_height_cat = case_when(
+      # preg_week missing → cannot determine
+      is.na(preg_week) ~ "undeterminable",
+
+      # Numeric + within ±2 cm of GA → appropriate
+      !is.na(fundal_height) &
+        fundal_height >= preg_week - 2 &
+        fundal_height <= preg_week + 2 ~ "appropriate",
+
+      # Numeric + outside ±2 cm → inappropriate
+      !is.na(fundal_height) &
+        (fundal_height < preg_week - 2 | fundal_height > preg_week + 2) ~ "inappropriate",
+
+      # Text categories from original column
+      grepl("Sesuai", fundal_height_orig, ignore.case = TRUE) ~ "appropriate",
+      grepl("Tidak", fundal_height_orig, ignore.case = TRUE) ~ "inappropriate",
+
+      # Everything else
+      TRUE ~ NA_character_
+    ),
+
+    # Optional: make it a clean factor for easier summary/plotting
+    fundal_height_cat = factor(
+      fundal_height_cat,
+      levels = c("appropriate", "inappropriate", "undeterminable")
+    )
+  )
+enc <- enc %>% select(-fundal_height_orig)
+
+## Fetal heart rate
+enc <- enc %>%
+  mutate(
+    # Keep original text before numeric parsing
+    fhr_orig = fhr,
+
+    # 1️⃣ Convert to numeric (overwriting original variable)
+    fhr = suppressWarnings(parse_number(fhr)),
+
+    # 2️⃣ Create categorical classification
+    fhr_cat = case_when(
+      # Numeric + normal range (120–160 bpm)
+      !is.na(fhr) & fhr >= 120 & fhr <= 160 ~ "normal",
+
+      # Numeric + abnormal (<120 or >160 bpm)
+      !is.na(fhr) & (fhr < 120 | fhr > 160) ~ "abnormal",
+
+      # Text category: "Normal fetal heart rate"
+      grepl("normal", fhr_orig, ignore.case = TRUE) ~ "normal",
+
+      # Text category: "Abnormal" if explicitly mentioned
+      grepl("abnormal", fhr_orig, ignore.case = TRUE) ~ "abnormal",
+
+      # Everything else — unknown or missing
+      TRUE ~ NA_character_
+    ),
+
+    # 3️⃣ Convert to factor for cleaner analysis
+    fhr_cat = factor(fhr_cat, levels = c("normal", "abnormal"))
+  ) %>%
+  select(-fhr_orig)
+
+## Changing into numeric values for these 4 variables
+enc <- enc %>% mutate(across(c(bp_sys, bp_dia, fhr, fundal_height), as.numeric))
+```
+
+
+
+#### Qisqus
+```{r}
+## identify common column names
+common_cols <- intersect(names(qisqus), cb_qisqus$old_var)
+
+# renaming variable names according to the ones in the dictionary
+qisqus <- qisqus %>%
+  rename_with(
+    ~ cb_qisqus$new_var[match(., cb_qisqus$old_var)],
+    .cols = all_of(common_cols)
+  )
+
+# changing variables types (according to the dictionary)
+for (i in seq_len(nrow(cb_qisqus))) {
+  var  <- cb_qisqus$new_var[i]
+  type <- cb_qisqus$var_type[i]
+  
+  if (var %in% names(qisqus)) {
+    
+    qisqus[[var]] <- switch(
+      type,
+      "chr"     = as.character(qisqus[[var]]),
+      "factor"  = as.factor(qisqus[[var]]),
+      "num"     = as.numeric(qisqus[[var]]),
+      "int"     = as.integer(qisqus[[var]]),
+      "date"    = as.Date(qisqus[[var]]),
+      
+      # ---- POSIXct with no timezone conversion ----
+      "POSIXct" = as.POSIXct(
+        qisqus[[var]],
+        format = "%B %d, %Y, %I:%M %p",
+        tz = ""   # no conversion; use as-is
+      ),
+      
+      # fallback
+      qisqus[[var]]
+    )
+  }
+}
+
+# Add sent_date in date format
+qisqus <- qisqus %>% mutate(sent_date = as.Date(sent))
+
+```
+
+#### pbg
+
+```{r}
+## identify common column names
+common_cols <- intersect(names(pbg), cb_pbg$old_var)
+
+# renaming variable names according to the ones in the dictionary
+pbg <- pbg %>%
+  rename_with(
+    ~ cb_pbg$new_var[match(., cb_pbg$old_var)],
+    .cols = all_of(common_cols)
+  )
+
+# changing variables types (according to the dictionary)
+for (i in seq_len(nrow(cb_pbg))) {
+  var <- cb_pbg$new_var[i]
+  type <- cb_pbg$var_type[i]
+  
+  if (var %in% names(pbg)) {
+    pbg[[var]] <- switch(
+      type,
+      "chr" = as.character(pbg[[var]]),
+      "factor"    = as.factor(pbg[[var]]),
+      "num"   = as.numeric(pbg[[var]]),
+      "int"   = as.integer(pbg[[var]]),
+      "date"      = as.Date(pbg[[var]]),
+      pbg[[var]]  # fallback: unchanged
+    )
+  }
+}
+
+pbg <- pbg %>% mutate(kabupaten = "purbalingga")
+
+```
+
+#### lbr
+
+```{r}
+## identify common column names
+common_cols <- intersect(names(lbr), cb_lbr$old_var)
+
+# renaming variable names according to the ones in the dictionary
+lbr <- lbr %>%
+  rename_with(
+    ~ cb_lbr$new_var[match(., cb_lbr$old_var)],
+    .cols = all_of(common_cols)
+  )
+
+# changing variables types (according to the dictionary)
+for (i in seq_len(nrow(cb_lbr))) {
+  var <- cb_lbr$new_var[i]
+  type <- cb_lbr$var_type[i]
+  
+  if (var %in% names(lbr)) {
+    lbr[[var]] <- switch(
+      type,
+      "chr" = as.character(lbr[[var]]),
+      "factor"    = as.factor(lbr[[var]]),
+      "num"   = as.numeric(lbr[[var]]),
+      "int"   = as.integer(lbr[[var]]),
+      "date"      = as.Date(lbr[[var]]),
+      lbr[[var]]  # fallback: unchanged
+    )
+  }
+}
+
+# eliminate unnecessary variable
+lbr <- lbr %>% select(-unique_id_2)
+
+lbr <- lbr %>% mutate(kabupaten = "lombok barat")
+```
+
+#### Append lbr and pbg
+
+```{r}
+cohort <- bind_rows(pbg, lbr)
+```
+
+### 3. Standardize
+
+```{r}
+# create standardization function
+standardize_dataset <- function(df) {
+  
+  # ----- 1. Standardize identifier variables -----
+  if ("nik" %in% names(df)) {
+    df$nik <- df$nik %>%
+      as.character() %>%
+      str_replace_all("\\s+", "") %>%
+      str_replace_all("[^0-9]", "") %>%
+      na_if("")
+  }
+  
+  if ("phone" %in% names(df)) {
+    df$phone <- df$phone %>%
+      as.character() %>%
+      str_replace_all("\\s+", "") %>%
+      str_replace_all("[-()]", "") %>%
+      str_replace("^\\+62", "0") %>%
+      str_replace("^62", "0") %>%
+      str_replace_all("[^0-9]", "") %>%
+      na_if("")
+  }
+  
+  # ----- 2. Standardize ALL CHARACTER VARIABLES -----
+  df <- df %>%
+    mutate(across(
+      where(is.character),
+      ~ .x %>%
+          str_squish() %>%
+          str_to_lower() %>%
+          na_if("")
+    ))
+  
+  # ----- 3. Standardize ALL NUMERICS -----
+  df <- df %>%
+    mutate(across(
+      where(is.numeric),
+      ~ suppressWarnings(as.numeric(.x))
+    ))
+  
+  # ----- 4. Standardize ALL INTEGERS -----
+  df <- df %>%
+    mutate(across(
+      where(is.integer),
+      ~ suppressWarnings(as.integer(.x))
+    ))
+  
+  # ----- 5. Standardize ALL DATES -----
+  df <- df %>%
+  mutate(across(
+    where(~ inherits(.x, "Date")),
+    ~ as.Date(.x)
+  ))
+  
+  # ----- 6. Standardize ALL POSIXct (datetimes) -----
+  df <- df %>%
+  mutate(across(
+    where(~ inherits(.x, "POSIXct")),
+    ~ as.POSIXct(.x, tz = "")
+  ))
+  df
+}
+
+enc     <- standardize_dataset(enc)
+qisqus  <- standardize_dataset(qisqus)
+cohort  <- standardize_dataset(cohort)
+```
+
+### Check pairing performance
+```{r}
+# Phone_clean
+cohort$phone_clean <- cohort$phone %>%
+  as.character() %>%
+  str_replace("^62", "0")
+
+check_pairing <- function(df1, var1, df2, var2) {
+  x <- df1[[var1]]
+  y <- df2[[var2]]
+  
+  # Remove NA
+  x_no_na <- x[!is.na(x)]
+  y_no_na <- y[!is.na(y)]
+
+  # Compute stats
+  matches_in_df1  <- sum(x_no_na %in% y_no_na)
+  matches_in_df2  <- sum(y_no_na %in% x_no_na)
+  unique_df1      <- length(unique(x_no_na))
+  unique_df2      <- length(unique(y_no_na))
+  intersection    <- length(intersect(x_no_na, y_no_na))
+  
+  tibble::tibble(
+    df1_var = var1,
+    df2_var = var2,
+    unique_df1,
+    unique_df2,
+    intersection,
+    pct_df1_matched = round(matches_in_df1 / unique_df1 * 100, 2),
+    pct_df2_matched = round(matches_in_df2 / unique_df2 * 100, 2)
+  )
+}
+
+# enc and cohort (by nik)
+check_pairing(enc, "nik", cohort, "nik")
+
+# enc and cohort (by phone number)
+check_pairing(enc, "phone", cohort, "phone_clean")
+
+# enc and qisqus (by phone number)
+check_pairing(enc, "phone", qisqus, "phone")
+
+# qisqus and cohort (by phone number)
+check_pairing(qisqus, "phone", cohort, "phone_clean")
+
+```
+
+## Creating Key Datasets
+
+### Message logs (message)
+
+Objective: filter only relevant messages in qisqus dataset
+
+```{r}
+## Filter only for social science intervention messages and within appropriate times (after 18.00)
+qisqus_filtered <- qisqus %>%
+  dplyr::filter(
+    template %in% c(
+      "soc_science_posyandu_known",
+      "anc_without_posy_10112025_2",
+      "anc_with_posy_10112025",
+      "anc_without_posy_10112025",
+      "2025_posyandureminder"
+    )
+  )
+```
+
+### Encounter (encounter)
+
+```{r}
+# filter only 19 sept or onwards
+enc_filtered <- enc %>%
+  filter(visit_date >= as.Date("2025-11-10"))
+
+```
+
+# Data Analysis (NEW)
+
+## Baseline Analysis (cohort dataset)
+How would you differentiate the cohort characteristics between intervention groups
+```{r}
+# puskesmas x cluster
+table_puskesmas <- cohort %>% 
+  tabyl(puskesmas, cluster) %>% 
+  adorn_totals("row") %>% 
+  adorn_percentages("row") %>% 
+  adorn_pct_formatting(digits = 1) %>% 
+  adorn_ns()
+# trimester x cluster
+table_trim <- cohort %>% 
+  tabyl(trim, cluster) %>% 
+  adorn_totals("row") %>% 
+  adorn_percentages("row") %>% 
+  adorn_pct_formatting(digits = 1) %>% 
+  adorn_ns()
+# kabupaten x cluster
+table_kab <- cohort %>% 
+  tabyl(kabupaten, cluster) %>% 
+  adorn_totals("row") %>% 
+  adorn_percentages("row") %>% 
+  adorn_pct_formatting(digits = 1) %>% 
+  adorn_ns()
+# hpht x cluster
+table_hpht <- cohort %>% 
+  group_by(cluster) %>% 
+  summarise(
+    hpht_mean_sd = sprintf("%.1f ± %.1f", 
+                           mean(hpht_days, na.rm = TRUE), 
+                           sd(hpht_days, na.rm = TRUE))
+  )
+
+## Convert into a single table
+### Make long format
+make_long <- function(tab, variable_name) {
+  # Ensure first column is character and rename it to "category"
+  tab2 <- tab %>%
+    rename(category = 1) %>%
+    mutate(category = as.character(category))
+  
+  # Use pivot_longer (fallback to gather if needed)
+  if ("pivot_longer" %in% ls("package:tidyr")) {
+    long <- tidyr::pivot_longer(tab2, cols = -category,
+                                names_to = "cluster", values_to = "value")
+  } else {
+    # for older tidyr
+    long <- tidyr::gather(tab2, key = "cluster", value = "value", -category)
+  }
+  
+  # Construct tibble explicitly (avoids select masking issues)
+  tibble::tibble(
+    variable = rep(variable_name, nrow(long)),
+    category = as.character(long$category),
+    cluster  = as.character(long$cluster),
+    value    = as.character(long$value)
+  )
+}
+
+#### Apply to three tables
+
+long_puskesmas <- make_long(table_puskesmas, "Puskesmas")
+long_trim       <- make_long(table_trim,        "Trimester")
+long_kab        <- make_long(table_kab,         "Kabupaten")
+
+### Continuous variable
+table_hpht_clean <- table_hpht %>% 
+  mutate(
+    variable = "HPHT days",
+    category = "Mean ± SD"
+  ) %>%
+  { tibble::tibble(
+      variable = .$variable,
+      category = .$category,
+      cluster  = as.character(.$cluster),
+      value    = as.character(.$hpht_mean_sd)
+    )}
+
+
+### Bind
+baseline_table <- bind_rows(
+  long_puskesmas,
+  long_trim,
+  long_kab,
+  table_hpht_clean
+)
+### Wide format
+baseline_wide <- baseline_table %>% 
+  pivot_wider(
+    names_from = cluster,
+    values_from = value
+  ) %>% 
+  arrange(variable)
+
+## Relabel and make clean format
+
+baseline_clean <- baseline_wide %>%
+  mutate(
+    group = case_when(
+      variable == "Kabupaten" ~ "District (Kabupaten)",
+      variable == "Puskesmas" ~ "Catchment Area (Puskesmas)",
+      variable == "Trimester" ~ "Trimester",
+      variable == "HPHT days" ~ "Continuous Variables",
+      TRUE ~ variable
+    ),
+    category = str_to_title(category)
+  ) %>%
+  arrange(factor(group, levels = c(
+    "Catchment Area (Puskesmas)",
+    "Trimester",
+    "District (Kabupaten)",
+    "Continuous Variables"
+  )))
+
+table_gt <- baseline_clean %>%
+  gt(
+    rowname_col = "category",
+    groupname_col = "group"
+  ) %>%
+  tab_header(
+    title = md("**Cohort Characteristics by Intervention Group (Cluster)**"),
+    subtitle = "Counts (percentages, row-wise across clusters) for categorical variables; mean (SD) for continuous variables"
+  ) %>%
+  cols_label(
+    control = md("**Control**"),
+    intervention = md("**Intervention**")
+  ) %>%
+  tab_options(
+    table.font.size = px(14),
+    heading.align = "center",
+    row_group.as_column = FALSE
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", size = px(15))
+    ),
+    locations = cells_row_groups()
+  ) %>%
+  tab_style(
+    style = cell_text(indent = px(20)),
+    locations = cells_stub(rows = everything())
+  ) %>%
+  tab_footnote(
+    footnote = "Percentages calculated row-wise across clusters.",
+    locations = cells_title(groups = "subtitle")
+  ) %>%
+  tab_footnote(
+    footnote = "Continuous variables are presented as mean (SD).",
+    locations = cells_row_groups(groups = "Continuous Variables")
+  )
+
+table_gt
+
+## Revision
+baseline_clean2 <- baseline_wide %>%
+  # 1. Remove variable column later in gt
+  mutate(
+    # 2. Clean Puskesmas names
+    category = category %>%
+      str_remove("^pkm\\s+") %>%
+      str_remove("^puskesmas\\s+") %>%
+      str_to_title(),
+    
+    # 3. Clean trimester labels
+    category = case_when(
+      variable == "Trimester" & str_detect(category, "1") ~ "I",
+      variable == "Trimester" & str_detect(category, "2") ~ "II",
+      variable == "Trimester" & str_detect(category, "3") ~ "III",
+      TRUE ~ category
+    ),
+    
+    # 4. Clean row-group names
+    group = case_when(
+      variable == "Kabupaten" ~ "District",
+      variable == "Puskesmas" ~ "Catchment Area",
+      variable == "Trimester" ~ "Trimester",
+      variable == "HPHT days" ~ "HPHT days",   # replaces “Continuous Variables”
+      TRUE ~ variable
+    )
+  ) %>%
+  arrange(factor(group, levels = c(
+    "Catchment Area",
+    "Trimester",
+    "District",
+    "HPHT days"
+  )))
+
+table_gt2 <- baseline_clean2 %>%
+  gt(
+    rowname_col = "category",
+    groupname_col = "group"
+  ) %>%
+  tab_header(
+    title = md("**Cohort Characteristics by Intervention Group (Cluster)**"),
+    subtitle = md("Counts (percentages, row-wise across clusters) for categorical variables; mean (SD) for continuous variables")
+  ) %>%
+  # 1. Remove the variable column
+  cols_hide("variable") %>%
+  cols_label(
+    control = md("**Control**"),
+    intervention = md("**Intervention**")
+  ) %>%
+  tab_options(
+    table.font.size = px(14),
+    heading.align = "center"
+  ) %>%
+  # Bold group headers
+  tab_style(
+    style = cell_text(weight = "bold", size = px(15)),
+    locations = cells_row_groups()
+  ) %>%
+  # Indentation for category labels
+  tab_style(
+    style = cell_text(indent = px(20)),
+    locations = cells_stub(rows = everything())
+  )
+
+table_gt2
+
+
+# Removing total
+
+baseline_nototal <- baseline_clean2 %>%
+  filter(!str_to_lower(category) %in% c("total"))
+
+# overall total row
+
+overall_total <- baseline_clean2 %>%
+  filter(str_to_lower(category) == "total") %>%
+  slice(1) %>%                # one row is enough
+  mutate(
+    group = "Overall",
+    category = "Total"
+  )
+
+# binding
+
+baseline_final <- bind_rows(
+  baseline_nototal,
+  overall_total
+)
+
+# new gt table
+
+table_gt3 <- baseline_final %>%
+  gt(
+    rowname_col = "category",
+    groupname_col = "group"
+  ) %>%
+  tab_header(
+    title = md("**Cohort Characteristics by Intervention Group (Cluster)**"),
+    subtitle = md("Counts (percentages, row-wise across clusters) for categorical variables; mean (SD) for continuous variables")
+  ) %>%
+  cols_hide("variable") %>%
+  cols_label(
+    control = md("**Control**"),
+    intervention = md("**Intervention**")
+  ) %>%
+  tab_options(
+    table.font.size = px(14),
+    heading.align = "center"
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold", size = px(15)),
+    locations = cells_row_groups()
+  ) %>%
+  tab_style(
+    style = cell_text(indent = px(20)),
+    locations = cells_stub(rows = everything())
+  ) %>%
+  # Bold the final Total row
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_stub(rows = category == "Total")
+  )
+
+# render table
+table_gt3
+
+## Adding P Values
+# Puskesmas p-value (chi-square)
+p_puskesmas <- chisq.test(table(cohort$puskesmas, cohort$cluster))$p.value
+
+# Trimester p-value (chi-square)
+p_trimester <- chisq.test(table(cohort$trim, cohort$cluster))$p.value
+
+# District p-value (chi-square)
+p_district <- chisq.test(table(cohort$kabupaten, cohort$cluster))$p.value
+
+# HPHT days p-value (t-test)
+p_hpht <- t.test(hpht_days ~ cluster, data = cohort)$p.value
+
+fmt_p <- function(p) sprintf("%.3f", p)
+
+p_values <- tibble::tibble(
+  group = c("Catchment Area", "Trimester", "District", "HPHT days"),
+  p = c(fmt_p(p_puskesmas), fmt_p(p_trimester), fmt_p(p_district), fmt_p(p_hpht))
+)
+
+# To baseline_final
+baseline_with_p <- baseline_final %>%
+  left_join(p_values, by = "group") %>%
+  mutate(
+    p = ifelse(category == group, p, ""),     # show only at header row
+    category = ifelse(category == group, "", category)  # blank row label for header row
+  )
+
+# updated Gt table
+table_gt4 <- baseline_with_p %>%
+  gt(
+    rowname_col = "category",
+    groupname_col = "group"
+  ) %>%
+  tab_header(
+    title = md("**Cohort Characteristics by Intervention Group (Cluster)**"),
+    subtitle = md("Counts (percentages, row-wise across clusters) for categorical variables; mean (SD) for continuous variables")
+  ) %>%
+  cols_hide("variable") %>%
+  cols_label(
+    control = md("**Control**"),
+    intervention = md("**Intervention**"),
+    p = md("**p**")
+  ) %>%
+  tab_options(table.font.size = px(14), heading.align = "center") %>%
+  # Bold group headers
+  tab_style(
+    style  = cell_text(weight = "bold", size = px(15)),
+    locations = cells_row_groups()
+  ) %>%
+  # Indent detail rows
+  tab_style(
+    style = cell_text(indent = px(20)),
+    locations = cells_stub(
+      rows = category != ""   # only non-header rows
+    )
+  ) %>%
+  # Bold the final overall Total row
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_stub(rows = category == "Total")
+  )
+
+table_gt4
+
+```
+
+
+## Engagement metrics (qisqus vs cohort dataset)
+
+## Hypothesis testing
+How many encounters from the cohort recorded currently?
+How it compares between those in intervention group and those who are in control group
+
+```{r}
+
+```
+
+
+
+-------------------------------------------------------------------------------------------
+# Data Preparation
+
+
+### Message
+
+```{r}
+
+# Filter to only include those who are part of cohort group
+qisqus_filtered <- qisqus_filtered %>%
+  filter(phone %in% cohort$phone_clean)
+
+qisqus_filtered <- qisqus_filtered %>%
+  mutate(across(
+    where(is.logical),
+    ~ factor(if_else(.x, "Yes", "No"), levels = c("Yes", "No"))
+  ))
+
+```
+
+#### Adding Variables
+
+```{r}
+## ADDING VARIABLES
+# phone_clean: Clean and trim leading 0 on phone_number in encounter dataset
+encounter <- encounter %>%
+  mutate(
+    phone_clean = case_when(
+      is.na(phone_number) ~ NA_character_,
+      str_starts(phone_number, "62") ~ str_sub(phone_number, 3),  # remove "62"
+      str_starts(phone_number, "0")  ~ str_sub(phone_number, 2),  # remove "0"
+      TRUE ~ phone_number  # leave unchanged otherwise
+    )
+  )
+# age
+encounter <- encounter %>%
+  mutate(
+    # Ensure both variables are Date type
+    visit_date = as.Date(visit_date),
+    tgllahir = as.Date(tgllahir),
+
+    # Calculate age in years at the time of visit
+    age_years = if_else(
+      !is.na(visit_date) & !is.na(tgllahir),
+      as.numeric(difftime(visit_date, tgllahir, units = "days")) / 365.25,
+      NA_real_
+    ),
+
+    # Round to one decimal place for clarity
+    age_years = round(age_years, 1)
+  )
+
+# Gestational Age and Trimester
+encounter <- encounter %>%
+  mutate(
+    # Ensure both variables are in Date format
+    visit_date = as.Date(visit_date),
+    last_menstrual_period = as.Date(last_menstrual_period),
+
+    # Calculate gestational age in completed weeks (only if both dates valid)
+    gest_age_new = if_else(
+      !is.na(last_menstrual_period) & !is.na(visit_date),
+      as.numeric(difftime(visit_date, last_menstrual_period, units = "weeks")),
+      NA_real_
+    ),
+
+    # Trimester classification based on gestational age
+    trimester = case_when(
+      is.na(gest_age_new) ~ NA_character_,
+      gest_age_new < 12 ~ "I",
+      gest_age_new >= 12 & gest_age_new < 24 ~ "II",
+      gest_age_new >= 24 ~ "III"
+    )
+  )
+
+```
+
+#### Censor invalid variables
+
+```{r}
+
+# Filter only puskesmas within Cohort's area
+# Define the allowed Puskesmas names
+allowed_puskesmas <- c(
+  "PUSKESMAS SERAYU LARANGAN",
+  "PUSKESMAS KARANGJAMBU",
+  "PUSKESMAS KALIGONDANG",
+  "PUSKESMAS BOJONG",
+  "PUSKESMAS BOBOTSARI",
+  "PUSKESMAS LABUAPI",
+  "PUSKESMAS SIGERONGAN"
+)
+
+# Filter the dataset
+encounter <- encounter %>%
+  filter(puskesmas_name %in% allowed_puskesmas)
+
+# Filter encounter: only those with valid dates (not from the future)
+encounter <- encounter %>%
+  filter(visit_date <= Sys.Date()                      # not from the future
+  )
+
+encounter <- encounter %>%
+  distinct(NIK, nama_pasien, visit_date, .keep_all = TRUE)
+
+# F1 Filter valid phone number
+encounter_f1 <- encounter %>%
+  filter(
+    !is.na(phone_number),                         # not NA
+    !grepl("^invalid$", phone_number, ignore.case = TRUE),  # not "invalid"
+    grepl("^[0-9+()\\s-]+$", phone_number),          # <- hyphen moved to the end
+    nchar(gsub("[^0-9]", "", phone_number)) >= 8,    # at least 8 digits
+    nchar(gsub("[^0-9]", "", phone_number)) <= 15    # max 15 digits
+  )
+
+```
+
+### Cohort
+
+```{r}
+# ---- Step 2: filter cohort for valid LMP ----
+ref_date <- as.Date("2025-09-18")
+cohort <- cohort %>%
+  # ensure date type and compute gestational age in weeks
+  mutate(
+    pregnancy_start.y = as.Date(pregnancy_start.y),
+    gestational_age_weeks = as.numeric(ref_date - pregnancy_start.y) / 7
+  ) %>%
+  # keep those with a non-missing, non-negative GA and GA < 40 weeks
+  filter(
+    !is.na(gestational_age_weeks),
+    gestational_age_weeks >= 0,
+    gestational_age_weeks < 40
+  )
+
+cohort28 <- cohort %>%
+  # ensure date type and compute gestational age in weeks
+  mutate(
+    pregnancy_start.y = as.Date(pregnancy_start.y),
+    gestational_age_weeks = as.numeric(ref_date - pregnancy_start.y) / 7
+  ) %>%
+  # keep those with a non-missing, non-negative GA and GA < 40 weeks
+  filter(
+    !is.na(gestational_age_weeks),
+    gestational_age_weeks >= 0,
+    gestational_age_weeks < 28
+  )
+
+# ---- Step 3: prepare message message summary ----
+msg_summary <- message %>%
+  filter(phone_clean %in% cohort$phone) %>%  # only cohort participants
+  select(phone_clean, `Sent At`, Status) %>%
+  arrange(phone_clean, `Sent At`) %>%
+  group_by(phone_clean) %>%
+  mutate(msg_index = row_number()) %>%
+  pivot_wider(
+    names_from = msg_index,
+    values_from = c(`Sent At`, Status),
+    names_glue = "msg_{.value}_{msg_index}"
+  )
+
+# ---- Step 4: prepare encounter summary ----
+enc_summary <- encounter %>%
+  # 1. Clean and validate phone numbers
+  filter(
+    !is.na(phone_clean),                             # remove NAs
+    str_detect(phone_clean, "^[0-9]+$"),             # keep digits only
+    nchar(phone_clean) >= 8,                         # realistic min length
+    nchar(phone_clean) <= 15,                        # ITU max length
+    !phone_clean %in% c(                             # remove known invalid/test numbers
+      "0000000000", "000000000", "00000000",
+      "800000000", "8000000000", "80000000000",
+      "89999999999", "80000000450", "12345678910",
+      "818550590", "99999999999", "89899999999"
+    )
+  ) %>%
+  
+  # 2. Remove duplicate encounters (same phone, same date)
+  distinct(phone_clean, visit_date, .keep_all = TRUE) %>%
+  
+  # 3. Sort and group by valid phone number
+  select(phone_clean, visit_date) %>%
+  arrange(phone_clean, visit_date) %>%
+  group_by(phone_clean) %>%
+  
+  # 4. Create sequential visit date columns per phone number
+  mutate(enc_index = row_number()) %>%
+  pivot_wider(
+    names_from = enc_index,
+    values_from = visit_date,
+    names_glue = "visit_date_{enc_index}"
+  ) %>%
+  
+  # 5. Add encounter flag
+  mutate(has_encounter = TRUE) %>%
+  ungroup()
+
+# ---- Step 5: merge all ----
+cohort28 <- cohort28 %>%
+  mutate(phone_clean = str_replace(phone, "^0+", "")) %>%
+  left_join(msg_summary, by = "phone_clean") %>%
+  left_join(enc_summary, by = "phone_clean") %>%
+  mutate(
+    has_encounter = ifelse(is.na(has_encounter), FALSE, has_encounter)
+  )
+
+# --- 1️⃣ Prepare dataset with derived variables ---
+cohort_summary <- cohort %>%
+  mutate(
+    age = as.numeric(difftime(ref_date, birthDate, units = "days")) / 365.25,
+    preg_weeks_new = as.numeric(difftime(ref_date, as.Date(pregnancy_start.x), units = "weeks"))
+  )
+
+```
+
+### Safe Proof
+
+```{r}
+safe_count_by_cluster <- function(data, var, cluster_col = "cluster_no") {
+  var_sym <- rlang::sym(var)
+  if (!(var %in% names(data))) {
+    warning(glue::glue("Skipping '{var}' — not found in dataset."))
+    return(NULL)
+  }
+  if (!(cluster_col %in% names(data))) {
+    warning(glue::glue("Skipping '{cluster_col}' — cluster column not found in dataset."))
+    return(NULL)
+  }
+
+  data %>%
+    dplyr::count(!!var_sym, !!rlang::sym(cluster_col)) %>%
+    dplyr::mutate(prop = round(100 * n / sum(n), 1))
+}
+
+# Example safe usage
+vars_of_interest <- c("kabupaten", "puskesmas_name", "Trimester", "some_missing_var")
+
+results <- purrr::map(
+  vars_of_interest,
+  ~ safe_count_by_cluster(cohort, .x)
+)
+
+# Filter out NULL results (skipped vars)
+results <- purrr::compact(results)
+
+```
+
+## Distribution
+
+### Define Plot Functions
+
+```{r}
+plot_distribution <- function(data, var, palette = my_palette) {
+  var <- rlang::ensym(var)
+
+  df_plot <- data %>%
+    count(!!var) %>%
+    mutate(
+      perc = 100 * n / sum(n),
+      !!var := forcats::fct_reorder(!!var, n)
+    )
+
+  total <- sum(df_plot$n, na.rm = TRUE)
+  
+  # 🎨 Randomly choose one from your preferred pastel set
+  fill_color <- sample(palette[c("aquamarine", "turmeric", "dark_purple", "muted_teal")], 1)
+
+  ggplot(df_plot, aes(x = !!var, y = n)) +
+    geom_col(fill = fill_color, color = NA) +  # use one consistent color per plot
+    geom_text(
+      aes(label = sprintf("%d (%.1f%%)", n, perc)),
+      vjust = -0.3,
+      size = 3.5,
+      color = palette["deep_slate"]
+    ) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.10))) +
+    labs(
+      x = rlang::as_name(var),
+      y = "Count",
+      title = paste("Distribution of", rlang::as_name(var)),
+      subtitle = sprintf("Total: %d", total)
+    ) +
+    theme_ss_report() +
+    theme(
+      legend.position = "none",                          # ✅ no redundant legend
+      axis.text.x = element_text(angle = 25, hjust = 1),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 11, color = palette["muted_teal"])
+    )
+}
+
+plot_daily_trend <- function(data, var, fill_color = my_palette["aquamarine"]) {
+  var <- rlang::ensym(var)
+
+  df_plot <- data %>%
+    mutate(date_var = as.Date(!!var)) %>%
+    filter(!is.na(date_var)) %>%
+    count(date_var)
+
+  n_days <- nrow(df_plot)
+
+  # Dynamically adjust date breaks
+  date_break_setting <- dplyr::case_when(
+    n_days <= 10 ~ "1 day",      # small range → every day
+    n_days <= 30 ~ "3 days",     # medium range → every 3 days
+    TRUE ~ "1 week"              # long range → every Monday
+  )
+
+  ggplot(df_plot, aes(x = date_var, y = n)) +
+    geom_col(fill = fill_color) +
+    geom_text(
+      aes(label = n),
+      vjust = -0.3,
+      size = 3.3,
+      color = my_palette["deep_slate"]
+    ) +
+    scale_x_date(
+      date_labels = "%b %d",
+      date_breaks = date_break_setting,
+      expand = expansion(mult = c(0.01, 0.05))
+    ) +
+    labs(
+      title = paste("Messages per Day –", rlang::as_name(var)),
+      x = "Date",
+      y = "Count"
+    ) +
+    theme_ss_report() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(size = 14, face = "bold")
+    )
+}
+
+plot_occurrence_distribution <- function(data, var, fill_color = my_palette["aquamarine"]) {
+  var <- rlang::ensym(var)
+  var_name <- rlang::as_name(var)
+
+  # --- 1️⃣ Conditional cleaning for phone numbers ---
+  df_clean <- data
+  if (var_name == "phone_clean") {
+    df_clean <- df_clean %>%
+      filter(
+        !is.na(phone_clean),
+        stringr::str_detect(phone_clean, "^[0-9]+$"),
+        nchar(phone_clean) >= 8,
+        nchar(phone_clean) <= 15,
+        !phone_clean %in% c(
+          "0000000000", "000000000", "00000000",
+          "800000000", "8000000000", "80000000000",
+          "89999999999", "80000000450", "12345678910",
+          "818550590", "99999999999", "89899999999"
+        )
+      )
+  } else {
+    df_clean <- df_clean %>%
+      filter(!is.na(!!var))
+  }
+
+  # --- 2️⃣ Count occurrences and summarize distribution ---
+  df_counts <- df_clean %>%
+    count(!!var, name = "n_occurrences")
+
+  df_distribution <- df_counts %>%
+    count(n_occurrences, name = "n_entities") %>%
+    mutate(perc = 100 * n_entities / sum(n_entities))
+
+  # --- 3️⃣ Plot ---
+  ggplot(df_distribution, aes(x = factor(n_occurrences), y = n_entities)) +
+    geom_col(fill = fill_color, color = NA) +
+    geom_text(
+      aes(label = sprintf("%d (%.1f%%)", n_entities, perc)),
+      vjust = -0.3,
+      size = 3.5,
+      color = my_palette["deep_slate"]
+    ) +
+    labs(
+      title = paste("Distribution of", var_name, "Occurrences"),
+      subtitle = if (var_name == "phone_clean") {
+        sprintf("Invalid/test numbers excluded (%d unique valid numbers)", nrow(df_counts))
+      } else {
+        sprintf("NAs excluded (%d unique valid values)", nrow(df_counts))
+      },
+      x = paste("Number of", var_name, "Occurrences"),
+      y = "Number of Unique Entities"
+    ) +
+    theme_ss_report() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 11, color = my_palette["muted_teal"]),
+      panel.grid.minor = element_blank()
+    )
+}
+
+plot_numeric_distribution <- function(data, var, bins = 30, fill_color = my_palette["aquamarine"]) {
+  var <- rlang::ensym(var)
+
+  ggplot(data, aes(x = !!var)) +
+    geom_histogram(
+      fill = fill_color,
+      color = "white",
+      bins = bins,
+      na.rm = TRUE
+    ) +
+    labs(
+      title = paste("Distribution of", rlang::as_name(var)),
+      x = rlang::as_name(var),
+      y = "Count"
+    ) +
+    theme_ss_report() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      panel.grid.minor = element_blank()
+    )
+}
+
+```
+
+### Message
+
+```{r message}
+# Exclude identifiers, free-texts, and irrelevant columns
+exclude_vars <- c(
+  "phone_number", "phone_clean", "message_id", "id",
+  "identifier", "Sent At", "Delivered At", "Read At", 
+  "updated_at", "created_at", "timestamp", "Template Name", "Notes", "Status"
+)
+
+# Automatically detect categorical variables
+categorical_vars <- names(message)[
+  sapply(message, \(x)
+    (is.character(x) || is.factor(x)) &&
+    n_distinct(x, na.rm = TRUE) <= 20 &&
+    n_distinct(x, na.rm = TRUE) > 1
+  )
+]
+
+# Remove unwanted variables
+categorical_vars <- setdiff(categorical_vars, exclude_vars)
+
+# --- Step 2: Generate plots automatically ---
+plots_message <- purrr::map(categorical_vars, ~ plot_distribution(message, !!sym(.x)))
+
+# --- Step 3: Display plots in sequence (Quarto-friendly) ---
+for (i in seq_along(categorical_vars)) {
+  cat("### Distribution of", categorical_vars[i], "\n\n")
+  print(plots_message[[i]])
+  cat("\n\n")
+}
+
+## Status
+# Step 1 — generate the base plot using your function
+p_status <- plot_distribution(message, Status)
+
+# Step 2 — modify it with ggplot2 layer updates
+p_status +
+  scale_fill_manual(
+    values = c(
+      "Sent" = "green2",
+      "Delivered" = "green3",
+      "Read" = "green4",
+      "Failed" = "firebrick3"
+    )
+  ) +
+  scale_x_discrete(limits = c("Sent", "Delivered", "Read", "Failed")) + # enforce order
+  labs(
+    x = "Status",
+    y = "Number of Messages",
+    title = "Distribution of Message Status"
+  ) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(face = "bold")
+  )
+
+# Notes (for error)
+# --- Summarize the data excluding NAs ---
+df_notes_summary <- message %>%
+  filter(!is.na(Notes)) %>%        # ✅ Exclude missing Notes
+  count(Notes) %>%
+  mutate(
+    perc = 100 * n / sum(n),
+    Notes_wrapped = str_wrap(Notes, width = 50)
+  )
+
+# --- Plot the summary ---
+ggplot(df_notes_summary, aes(x = fct_reorder(Notes_wrapped, n), y = n)) +
+  geom_col(fill = "firebrick") +
+  geom_text(
+    aes(label = sprintf("%d (%.1f%%)", n, perc)),
+    hjust = -0.1,
+    size = 3.3
+  ) +
+  coord_flip() +
+  expand_limits(y = max(df_notes_summary$n) * 1.1) +
+  labs(
+    x = "Notes",
+    y = "Count",
+    title = "Distribution of Notes (for Failed Messages)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9),
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.margin = margin(10, 30, 10, 10)
+  )
+# Phone number frequencies: how many received which
+plot_occurrence_distribution(message, `Phone Number`)
+# Daily trend
+plot_daily_trend(message, `Sent At`)
+```
+
+### Encounter
+
+```{r}
+# 🧩 Define variable groups of interest
+id_vars <- c("phone_clean", "nama_pasien", "NIK")
+cat_vars <- c("kabupaten", "puskesmas_name", "Sumber_Data")
+date_vars <- c("visit_date")
+numeric_vars <- c("age_years")
+
+# --- 1️⃣ Occurrence / Duplicate Frequency Charts ---
+cat("## 🔁 Occurrence Distributions\n\n")
+
+plots_occurrence_encounter <- map(id_vars, ~ 
+  plot_occurrence_distribution(encounter, !!sym(.x))
+)
+
+for (i in seq_along(id_vars)) {
+  cat("### Occurrence Distribution —", id_vars[i], "\n\n")
+  print(plots_occurrence_encounter[[i]])
+  cat("\n\n")
+}
+
+# --- 2️⃣ Categorical Variable Distributions ---
+cat("## 🏷️ Categorical Variable Distributions\n\n")
+
+plots_categorical_encounter <- map(cat_vars, ~ 
+  plot_distribution(encounter, !!sym(.x))
+)
+
+for (i in seq_along(cat_vars)) {
+  cat("### Distribution —", cat_vars[i], "\n\n")
+  print(plots_categorical_encounter[[i]])
+  cat("\n\n")
+}
+
+# --- 3️⃣ Temporal Trends ---
+cat("## 📅 Daily and Temporal Trends\n\n")
+
+plots_temporal_encounter <- map(date_vars, ~ 
+  plot_daily_trend(encounter, !!sym(.x))
+)
+
+
+for (i in seq_along(date_vars)) {
+  cat("### Daily Trend —", date_vars[i], "\n\n")
+  print(plots_temporal_encounter[[i]])
+  cat("\n\n")
+}
+
+# Numeric Distribution
+
+plots_numeric <- purrr::map(numeric_vars, ~ plot_numeric_distribution(encounter, !!sym(.x)))
+
+for (i in seq_along(numeric_vars)) {
+  cat("### Distribution –", numeric_vars[i], "\n\n")
+  print(plots_numeric[[i]])
+  cat("\n\n")
+}
+
+plot_numeric_distribution(
+  encounter %>% filter(gest_age_new >= 0, gest_age_new <= 45),
+  gest_age_new
+)
+```
+
+```{r, eval = FALSE}
+# usia_kehamilan_manual (Manually calculated gestational age)
+
+# 1️⃣ Summarize the counts
+df_age_dist <- encounter %>%
+  count(usia_kehamilan_manual) %>%
+  mutate(usia_kehamilan_manual = as.numeric(usia_kehamilan_manual))
+
+# 2️⃣ Create complete range 0–42 (fill missing weeks with 0 counts)
+df_age_dist_complete <- df_age_dist %>%
+  complete(usia_kehamilan_manual = 0:42, fill = list(n = 0)) %>%
+  mutate(perc = 100 * n / sum(n))
+
+# 3️⃣ Plot
+ggplot(df_age_dist_complete, aes(x = usia_kehamilan_manual, y = n)) +
+  geom_col(fill = "red3") +
+  geom_text(
+    aes(label = ifelse(n > 0, sprintf("%d (%.1f%%)", n, perc), "")),  # hide 0s
+    vjust = -0.3,
+    size = 3
+  ) +
+  labs(
+    x = "Gestational Age (weeks)",
+    y = "Count",
+    title = "Distribution of Gestational Age (Manual)"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, 42, 2)) +  # tick marks every 2 weeks
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# usia_kehamilan_hari_ini (current gestational age)
+# 1️⃣ Summarize the counts
+df_age_dist_today <- encounter %>%
+  count(usia_kehamilan_hari_ini) %>%
+  mutate(usia_kehamilan_hari_ini = as.numeric(usia_kehamilan_hari_ini))
+
+# 2️⃣ Create complete range 0–42 (fill missing weeks with 0 counts)
+df_age_dist_today_complete <- df_age_dist_today %>%
+  complete(usia_kehamilan_hari_ini = 0:42, fill = list(n = 0)) %>%
+  mutate(perc = 100 * n / sum(n))
+
+# 3️⃣ Plot
+ggplot(df_age_dist_today_complete, aes(x = usia_kehamilan_hari_ini, y = n)) +
+  geom_col(fill = "darkorange3") +
+  geom_text(
+    aes(label = ifelse(n > 0, sprintf("%d (%.1f%%)", n, perc), "")),
+    vjust = -0.3,
+    size = 3
+  ) +
+  labs(
+    x = "Current Gestational Age (weeks)",
+    y = "Count",
+    title = "Distribution of Current Gestational Age (usia_kehamilan_hari_ini)"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, 42, 2)) +  # tick marks every 2 weeks
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Usia Kehamilan (self-reported gestational age)
+# 1️⃣ Summarize the counts
+df_age_dist_main <- encounter %>%
+  count(usia_kehamilan) %>%
+  mutate(usia_kehamilan = as.numeric(usia_kehamilan))
+
+# 2️⃣ Create complete range 0–42 (fill missing weeks with 0 counts)
+df_age_dist_main_complete <- df_age_dist_main %>%
+  complete(usia_kehamilan = 0:42, fill = list(n = 0)) %>%
+  mutate(perc = 100 * n / sum(n))
+
+# 3️⃣ Plot
+ggplot(df_age_dist_main_complete, aes(x = usia_kehamilan, y = n)) +
+  geom_col(fill = "dodgerblue3") +
+  geom_text(
+    aes(label = ifelse(n > 0, sprintf("%d (%.1f%%)", n, perc), "")),
+    vjust = -0.3,
+    size = 3
+  ) +
+  labs(
+    x = "Gestational Age (weeks)",
+    y = "Count",
+    title = "Distribution of Gestational Age (usia_kehamilan)"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, 42, 2)) +  # tick marks every 2 weeks
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+### Cohort
+
+Safe Proof
+
+```{r}
+# --- SAFEST POSSIBLE VERSION ---
+# This will never break rendering again
+
+#| label: safe_cluster_summary
+#| echo: false
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(purrr)
+library(glue)
+library(rlang)
+
+# --- Define a robust helper function ---
+safe_count_by_cluster <- function(data, var, cluster_col = "cluster_no") {
+  # Convert variable names to symbols
+  var_sym <- rlang::sym(var)
+  cluster_sym <- rlang::sym(cluster_col)
+  
+  # Check that dataset exists
+  if (missing(data) || !is.data.frame(data)) {
+    message("⚠️ Provided object is not a valid dataset.")
+    return(NULL)
+  }
+  
+  # Check if target variable exists
+  if (!(var %in% names(data))) {
+    message(glue("⚠️ Variable '{var}' not found — skipping."))
+    return(NULL)
+  }
+  
+  # Check if cluster column exists
+  if (!(cluster_col %in% names(data))) {
+    message(glue("⚠️ Cluster column '{cluster_col}' not found — skipping."))
+    return(NULL)
+  }
+  
+  # Perform grouped count safely
+  tryCatch({
+    out <- data %>%
+      count(!!var_sym, !!cluster_sym, name = "n") %>%
+      group_by(!!cluster_sym) %>%
+      mutate(perc = round(100 * n / sum(n, na.rm = TRUE), 1)) %>%
+      ungroup()
+    return(out)
+  }, error = function(e) {
+    message(glue("⚠️ Error counting '{var}': {e$message}"))
+    return(NULL)
+  })
+}
+
+# --- Define which variables to summarise ---
+vars_of_interest <- c("kabupaten", "puskesmas_name", "Trimester")
+
+# --- Make sure dataset exists ---
+if (exists("cohort") && is.data.frame(cohort)) {
+  results <- purrr::map(vars_of_interest, function(v) {
+    safe_count_by_cluster(cohort, v)
+  }) %>%
+    purrr::compact()  # remove NULL results
+  
+  # --- Print tidy tables in order ---
+  for (i in seq_along(results)) {
+    cat("\n### Distribution by", vars_of_interest[i], "\n\n")
+    print(results[[i]])
+    cat("\n\n")
+  }
+  
+} else {
+  message("⚠️ Dataset 'cohort' not found — skipping this analysis.")
+}
+```
+
+Duplicate IDs: need workup and inspection.
+
+```{r duplicate id}
+# --- 1️⃣ Ensure key identifiers are character ---
+cohort <- cohort %>%
+  mutate(
+    nik = as.character(nik),
+    phone = as.character(phone),
+    cluster_no = as.character(cluster_no)
+  )
+
+# --- 2️⃣ Create duplicate summary helper function ---
+duplicate_summary <- function(data, var) {
+  var_sym <- sym(var)
+  df_dup <- data %>%
+    count(!!var_sym, name = "count") %>%
+    summarise(
+      unique_values = n(),
+      duplicates = sum(count > 1, na.rm = TRUE),
+      max_frequency = max(count, na.rm = TRUE)
+    ) %>%
+    mutate(variable = var)
+  return(df_dup)
+}
+
+# --- 3️⃣ Summarize duplicate stats for all key variables ---
+dup_summary_table <- bind_rows(
+  duplicate_summary(cohort, "nik"),
+  duplicate_summary(cohort, "name_text"),
+  duplicate_summary(cohort, "phone")
+) %>%
+  select(variable, unique_values, duplicates, max_frequency)
+
+# --- 4️⃣ Create detailed duplicate listings ---
+dup_nik <- cohort %>%
+  count(nik, name = "count") %>%
+  filter(count > 1) %>%
+  arrange(desc(count))
+
+dup_name <- cohort %>%
+  count(name_text, name = "count") %>%
+  filter(count > 1) %>%
+  arrange(desc(count))
+
+dup_phone <- cohort %>%
+  count(phone, name = "count") %>%
+  filter(count > 1) %>%
+  arrange(desc(count))
+
+# --- 5️⃣ Display in report ---
+
+## Summary Table (static)
+gt::gt(dup_summary_table) %>%
+  gt::tab_header(
+    title = md("**Duplicate Summary Overview**"),
+    subtitle = "Summary of unique and duplicated values in cohort identifiers"
+  ) %>%
+  gt::fmt_number(columns = where(is.numeric), decimals = 0)
+
+## Detailed Tables (interactive)
+cat("### 🔁 Duplicate NIKs\n")
+DT::datatable(dup_nik, options = list(pageLength = 10), caption = "Duplicate NIKs with frequency > 1")
+
+cat("### 👩‍🍼 Duplicate Names\n")
+DT::datatable(dup_name, options = list(pageLength = 10), caption = "Duplicate participant names")
+
+cat("### ☎️ Duplicate Phone Numbers\n")
+DT::datatable(dup_phone, options = list(pageLength = 10), caption = "Duplicate phone numbers")
+
+```
+
+Population characteristics: comparison between intervention groups
+
+```{r}
+
+#| label: cohort_summary_table
+#| echo: false
+#| warning: false
+#| message: false
+
+# 📅 Reference date
+ref_date <- as.Date("2025-09-18")
+
+# --- 1️⃣ Prepare dataset with derived variables ---
+if (!exists("cohort") || !is.data.frame(cohort)) {
+  stop("Dataset 'cohort' not found in environment.")
+}
+
+cohort_summary <- cohort %>%
+  mutate(
+    age = as.numeric(difftime(ref_date, birthDate, units = "days")) / 365.25,
+    preg_weeks_new = as.numeric(difftime(ref_date, as.Date(pregnancy_start.x), units = "weeks"))
+  )
+
+# --- 2️⃣ Define variable groups ---
+cat_vars <- c("organization_name.x", "kabupaten", "preg_group")
+
+# --- 3️⃣ Safe categorical summaries (count + row-wise %) ---
+safe_cat_summary <- function(data, var) {
+  if (!(var %in% names(data))) {
+    message(glue("⚠️ Variable '{var}' not found — skipping."))
+    return(NULL)
+  }
+  data %>%
+    count(.data[[var]], cluster_no, name = "n") %>%
+    group_by(.data[[var]]) %>%
+    mutate(pct = 100 * n / sum(n, na.rm = TRUE)) %>%
+    ungroup() %>%
+    mutate(variable = var) %>%
+    rename(category = !!sym(var)) %>%
+    mutate(value = sprintf("%d (%.1f%%)", n, pct)) %>%
+    select(variable, category, cluster_no, value)
+}
+
+cat_summary_list <- purrr::map(cat_vars, ~safe_cat_summary(cohort_summary, .x)) %>%
+  purrr::compact()
+
+cat_summary <- bind_rows(cat_summary_list) %>%
+  pivot_wider(names_from = cluster_no, values_from = value)
+
+# --- 4️⃣ Continuous summaries (mean ± SD) ---
+num_summary <- cohort_summary %>%
+  group_by(cluster_no) %>%
+  summarise(
+    age_mean = mean(age, na.rm = TRUE),
+    age_sd = sd(age, na.rm = TRUE),
+    preg_mean = mean(preg_weeks_new, na.rm = TRUE),
+    preg_sd = sd(preg_weeks_new, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    `Age (years)` = sprintf("%.1f (%.1f)", age_mean, age_sd),
+    `Pregnancy Weeks (current)` = sprintf("%.1f (%.1f)", preg_mean, preg_sd)
+  ) %>%
+  select(cluster_no, `Age (years)`, `Pregnancy Weeks (current)`) %>%
+  pivot_longer(cols = -cluster_no, names_to = "category", values_to = "value") %>%
+  mutate(variable = "Continuous Variables") %>%
+  pivot_wider(names_from = cluster_no, values_from = value)
+
+# --- 5️⃣ Combine categorical and continuous sections ---
+combined_table <- bind_rows(cat_summary, num_summary) %>%
+  mutate(
+    variable = recode(variable,
+      "organization_name.x" = "Catchment Area (by Puskesmas)",
+      "kabupaten" = "District",
+      "preg_group" = "Trimester",
+      .default = variable
+    )
+  )
+
+# --- 6️⃣ Rename cluster columns for readability ---
+cluster_labels <- c(
+  "1" = "Default",
+  "2" = "Var. 1",
+  "3" = "Var. 2",
+  "4" = "Var. 3",
+  "5" = "Var. 4"
+)
+
+combined_table <- combined_table %>%
+  rename_with(~ cluster_labels[.x], intersect(names(combined_table), names(cluster_labels)))
+
+# --- 7️⃣ Render clean GT table ---
+summary_gt <- combined_table %>%
+  gt(groupname_col = "variable") %>%
+  tab_header(
+    title = md("**Cohort Characteristics by Intervention Group (Cluster)**"),
+    subtitle = md("Counts (percentages, row-wise across clusters) for categorical variables; mean (SD) for continuous variables")
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    data_row.padding = px(4),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(12),
+    table.width = pct(100)
+  ) %>%
+  tab_source_note(md("*Percentages calculated row-wise (across clusters)*")) %>%
+  tab_source_note(md("*Continuous variables are mean (SD)*"))
+
+# 🪄 Display final table
+summary_gt
+
+
+```
+
+# Data Analysis
+
+## Message Cascade
+
+```{r, echo = FALSE}
+# === Prepare and compute totals ===
+df2 <- message %>%
+  mutate(
+    Status_clean = tolower(trimws(as.character(Status))),
+    Replied = ifelse(is.na(Replied), FALSE, Replied)
+  )
+
+delivered_statuses <- c("delivered", "read")
+failed_statuses    <- c("failed", "undelivered", "error")
+read_statuses      <- c("read")
+
+total        <- nrow(df2)
+failed       <- sum(df2$Status_clean %in% failed_statuses, na.rm = TRUE)
+sent         <- total - failed
+delivered    <- sum(df2$Status_clean %in% delivered_statuses, na.rm = TRUE)
+not_delivered<- pmax(sent - delivered, 0)
+read         <- sum(df2$Status_clean %in% read_statuses, na.rm = TRUE)
+not_read     <- pmax(delivered - read, 0)
+reply        <- sum(df2$Replied == TRUE & df2$Status_clean %in% read_statuses, na.rm = TRUE)
+no_reply     <- pmax(read - reply, 0)
+
+cat("Totals:", "total=", total, " sent=", sent, " failed=", failed,
+    " delivered=", delivered, " read=", read, " reply=", reply, "\n")
+
+# === Build flows ===
+flows <- tibble(
+  source = c("Total", "Total",
+             "Sent", "Sent",
+             "Delivered", "Delivered",
+             "Read", "Read"),
+  target = c("Sent", "Failed",
+             "Delivered", "Not Delivered",
+             "Read", "Not Read",
+             "Reply", "No Reply"),
+  value  = c(sent, failed,
+             delivered, not_delivered,
+             read, not_read,
+             reply, no_reply)
+) %>%
+  filter(value > 0) %>%
+  mutate(
+    percent = round(100 * value / total, 1),
+    label = paste0(value, " (", percent, "%)")
+  )
+
+# --- 1. Node names & link indices ---
+node_names <- unique(c(flows$source, flows$target))
+nodes <- tibble(name = node_names)
+
+links_df <- flows %>%
+  mutate(
+    source = match(source, node_names) - 1,
+    target = match(target, node_names) - 1
+  )
+
+# --- 2. Compute totals per node ---
+in_totals <- flows %>%
+  group_by(name = target) %>%
+  summarise(in_sum = sum(value), .groups = "drop")
+
+out_totals <- flows %>%
+  group_by(name = source) %>%
+  summarise(out_sum = sum(value), .groups = "drop")
+
+node_totals <- full_join(in_totals, out_totals, by = "name") %>%
+  mutate(
+    in_sum  = tidyr::replace_na(in_sum, 0),
+    out_sum = tidyr::replace_na(out_sum, 0),
+    total_value = pmax(in_sum, out_sum)
+  )
+
+node_totals <- node_totals %>%
+  mutate(total_value = ifelse(name == "Total", out_sum, total_value))
+
+# --- 3. Join totals and relabel nodes ---
+nodes <- nodes %>%
+  left_join(node_totals, by = "name") %>%
+  mutate(total_value = tidyr::replace_na(total_value, 0))
+
+node_label_map <- c(
+  "Total" = "Total messages",
+  "Sent"  = "Sent successfully",
+  "Failed" = "Failed to send",
+  "Delivered" = "Delivered to device",
+  "Not Delivered" = "Not delivered",
+  "Read" = "Read by recipient",
+  "Not Read" = "Not read",
+  "Reply" = "Replied",
+  "No Reply" = "No reply"
+)
+
+nodes <- nodes %>%
+  mutate(
+    display = dplyr::recode(name, !!!node_label_map),
+    percent = round(100 * total_value / total, 1),
+    label_full = paste0(display, "\n(", total_value, " | ", percent, "%)")
+  )
+
+# --- 4. Define node groups (fixed logic using original node names) ---
+nodes <- nodes %>%
+  mutate(
+    group = case_when(
+      name %in% c("Total", "Sent", "Delivered", "Read", "Reply") ~ "success",
+      TRUE ~ "failure"
+    )
+  )
+
+node_color_scale <- '
+  d3.scaleOrdinal()
+    .domain(["success", "failure"])
+    .range(["#2E8B57", "#B22222"])
+'
+
+# --- 5. Define color shades for links ---
+shade_success <- c("#006400", "#228B22", "#32CD32", "#7CFC00", "#ADFF2F")
+shade_failure <- c("#8B0000", "#B22222", "#DC143C", "#FA8072", "#FFC0CB")
+
+# Create lookup for target node groups
+node_lookup <- nodes %>%
+  mutate(index = 0:(n() - 1)) %>%
+  select(index, group)
+
+# Assign link group and gradient colors
+links_df <- links_df %>%
+  left_join(node_lookup, by = c("target" = "index")) %>%
+  rename(LinkGroup = group) %>%
+  mutate(
+    link_color = ifelse(
+      LinkGroup == "success",
+      shade_success[(row_number() - 1) %% length(shade_success) + 1],
+      shade_failure[(row_number() - 1) %% length(shade_failure) + 1]
+    )
+  )
+
+# --- 6. Sankey diagram with custom colors ---
+sn <- sankeyNetwork(
+  Links = links_df %>% select(source, target, value, LinkGroup),
+  Nodes = nodes %>% mutate(name = label_full),
+  Source = "source",
+  Target = "target",
+  Value = "value",
+  NodeID = "name",
+  NodeGroup = "group",
+  LinkGroup = "LinkGroup",
+  fontSize = 12,
+  nodeWidth = 30,
+  colourScale = node_color_scale
+)
+
+# Apply custom link colors and labels
+sn$x$links$color <- links_df$link_color
+sn$x$links$label <- links_df$label
+
+sn <- htmlwidgets::onRender(sn, '
+function(el, x) {
+  d3.select(el).selectAll(".link")
+    .style("stroke", function(d, i) { return x.links[i].color; })
+    .select("title").remove();
+
+  d3.select(el).selectAll(".link")
+    .append("title")
+    .text(function(d, i) { return x.links[i].label; });
+}
+')
+
+sn
+
+
+```
+
+## Descriptive analytics of message
+
+```{r, echo = FALSE}
+# --- 1️⃣ Recode message templates into intervention clusters ---
+message_cluster <- message %>%
+  mutate(
+    Template_Group = case_when(
+      `Template Name` %in% c("ss_var1_anc_reminder", "ss_var1_anc_reminder_rev") ~ "Var. 1",
+      `Template Name` %in% c("ss_var2_anc_reminder", "ss_var2_anc_reminder_rev") ~ "Var. 2",
+      `Template Name` == "ss_var3_anc_reminder" ~ "Var. 3",
+      `Template Name` == "ss_ver4_anc_reminder" ~ "Var. 4",
+      `Template Name` == "anc_reminder_spheres" ~ "Default",
+      TRUE ~ "Other"
+    )
+  )
+
+# --- 2️⃣ Summarise counts and percentages by status per cluster ---
+df_summary_cluster <- message_cluster %>%
+  count(Template_Group, Status) %>%
+  group_by(Template_Group) %>%
+  mutate(percent = 100 * n / sum(n, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_wider(
+    names_from = Status,
+    values_from = c(n, percent),
+    values_fill = 0,
+    names_glue = "{.value}_{Status}"
+  )
+
+# --- 3️⃣ Add reply summary by cluster ---
+df_reply <- message_cluster %>%
+  group_by(Template_Group) %>%
+  summarise(
+    total_messages = n(),
+    replied_count  = sum(Replied %in% c(TRUE, "Yes", "yes", 1), na.rm = TRUE),
+    replied_percent = 100 * replied_count / total_messages,
+    .groups = "drop"
+  )
+
+# --- 4️⃣ Merge reply + status summary ---
+df_summary_cluster <- df_summary_cluster %>%
+  left_join(df_reply, by = "Template_Group")
+
+# --- 5️⃣ Define column order and ensure consistency ---
+desired_order <- c(
+  "Template_Group",
+  "n_Sent", "percent_Sent",
+  "n_Delivered", "percent_Delivered",
+  "n_Read", "percent_Read",
+  "replied_count", "replied_percent",
+  "n_Failed", "percent_Failed",
+  "total_messages"
+)
+
+df_summary_cluster <- df_summary_cluster[, intersect(desired_order, names(df_summary_cluster))]
+
+# --- 6️⃣ Round percentage columns ---
+percent_cols <- grep("^percent_|replied_percent$", names(df_summary_cluster), value = TRUE)
+df_summary_cluster <- df_summary_cluster %>%
+  mutate(across(all_of(percent_cols), ~ round(.x, 1)))
+
+# --- 7️⃣ Rename headers for readability ---
+colnames(df_summary_cluster) <- recode(colnames(df_summary_cluster),
+  "Template_Group"     = "Cluster",
+  "n_Sent"             = "Sent (n)",
+  "percent_Sent"       = "Sent (%)",
+  "n_Delivered"        = "Delivered (n)",
+  "percent_Delivered"  = "Delivered (%)",
+  "n_Read"             = "Read (n)",
+  "percent_Read"       = "Read (%)",
+  "replied_count"      = "Reply (n)",
+  "replied_percent"    = "Reply (%)",
+  "n_Failed"           = "Failed (n)",
+  "percent_Failed"     = "Failed (%)",
+  "total_messages"     = "Total Messages"
+)
+
+# --- 8️⃣ Compute totals row across all clusters ---
+totals <- df_summary_cluster %>%
+  summarise(
+    Cluster          = "Total",
+    `Sent (n)`       = sum(`Sent (n)`, na.rm = TRUE),
+    `Delivered (n)`  = sum(`Delivered (n)`, na.rm = TRUE),
+    `Read (n)`       = sum(`Read (n)`, na.rm = TRUE),
+    `Reply (n)`      = sum(`Reply (n)`, na.rm = TRUE),
+    `Failed (n)`     = sum(`Failed (n)`, na.rm = TRUE),
+    `Total Messages` = sum(`Total Messages`, na.rm = TRUE)
+  ) %>%
+  mutate(
+    `Sent (%)`      = round(100 * `Sent (n)`      / `Total Messages`, 1),
+    `Delivered (%)` = round(100 * `Delivered (n)` / `Total Messages`, 1),
+    `Read (%)`      = round(100 * `Read (n)`      / `Total Messages`, 1),
+    `Reply (%)`     = round(100 * `Reply (n)`     / `Total Messages`, 1),
+    `Failed (%)`    = round(100 * `Failed (n)`    / `Total Messages`, 1)
+  )
+
+# --- 9️⃣ Bind totals row ---
+df_summary_cluster_total <- bind_rows(df_summary_cluster, totals)
+
+# --- ✅ Final Output ---
+df_summary_cluster_total
+
+gt_summary_cluster <- df_summary_cluster_total %>%
+  gt(rowname_col = "Cluster") %>%
+  fmt_number(
+    columns = matches("\\(n\\)$"),  # format all count columns
+    decimals = 0,
+    use_seps = TRUE
+  ) %>%
+  fmt_number(
+    columns = matches("\\(\\%\\)$"),  # format all percentage columns
+    decimals = 1
+  ) %>%
+  tab_header(
+    title = md("**📊 Message Delivery and Reply Summary by Cluster**"),
+    subtitle = md("Grouped by intervention variants (Default and Variations 1–4)")
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(rows = Cluster == "Total")
+  ) %>%
+  tab_style(
+    style = cell_fill(color = "#F3F6F9"),  # light gray highlight
+    locations = cells_body(rows = Cluster == "Total")
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) %>%
+  tab_options(
+    table.font.names = "Arial",
+    data_row.padding = px(4),
+    table.border.top.color = "transparent",
+    table.border.bottom.color = "transparent"
+  )
+
+gt_summary_cluster
+```
+
+## Engagement Analytics
+
+```{r}
+# --- Helper: safe counting for "Yes"/TRUE replies ----
+safe_sum_yesno <- function(x) {
+  sum(x %in% c(TRUE, "Yes", "yes", 1), na.rm = TRUE)
+}
+
+# --- Prepare engagement datasets (non-destructive) ---
+df_engagement <- message %>%
+  mutate(
+    group = case_when(
+      `Template Name` %in% c(
+        "ss_ver4_anc_reminder",
+        "ss_var3_anc_reminder",
+        "ss_var2_anc_reminder",
+        "ss_var1_anc_reminder",
+        "ss_var2_anc_reminder_rev",
+        "ss_var1_anc_reminder_rev"
+      ) ~ "Intervention",
+      `Template Name` == "anc_reminder_spheres" ~ "Control",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(group))   # keep only relevant templates
+
+df_variants <- message %>%
+  mutate(
+    variant_group = case_when(
+      `Template Name` == "anc_reminder_spheres" ~ "Control",
+      `Template Name` %in% c("ss_var1_anc_reminder", "ss_var1_anc_reminder_rev") ~ "Variant 1",
+      `Template Name` %in% c("ss_var2_anc_reminder", "ss_var2_anc_reminder_rev") ~ "Variant 2",
+      `Template Name` == "ss_var3_anc_reminder" ~ "Variant 3",
+      `Template Name` == "ss_ver4_anc_reminder" ~ "Variant 4",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(variant_group))
+
+# --- 1) Summaries: Intervention vs Control ---
+engagement_summary <- df_engagement %>%
+  group_by(group) %>%
+  summarise(
+    total_messages      = n(),
+    delivered_or_read   = sum(Status %in% c("Delivered", "Read")),
+    read_count          = sum(Status == "Read"),
+    replied_count       = safe_sum_yesno(Replied),
+    read_rate_pct       = round(100 * read_count / pmax(delivered_or_read, 1), 1),
+    reply_rate_pct      = round(100 * replied_count / pmax(total_messages, 1), 1),
+    .groups = "drop"
+  )
+
+# tidy gt table for engagement_summary
+engagement_summary_gt <- engagement_summary %>%
+  mutate(across(c(read_rate_pct, reply_rate_pct), ~ sprintf("%.1f%%", .x))) %>%
+  gt(rowname_col = "group") %>%
+  tab_header(
+    title = md("**Engagement: Intervention vs Control**"),
+    subtitle = md("Read and reply rates (percent); denominators: 'delivered_or_read' for read rate, 'total_messages' for replies")
+  )
+
+# --- 2) Summaries: Variant-level (Control + 4 Variants) ---
+engagement_by_variant <- df_variants %>%
+  group_by(variant_group) %>%
+  summarise(
+    total_messages     = n(),
+    delivered_or_read  = sum(Status %in% c("Delivered", "Read")),
+    read_count         = sum(Status == "Read"),
+    replied_count      = safe_sum_yesno(Replied),
+    read_rate_pct      = round(100 * read_count / pmax(delivered_or_read, 1), 1),
+    reply_rate_pct     = round(100 * replied_count / pmax(total_messages, 1), 1),
+    .groups = "drop"
+  ) %>%
+  # ensure desired ordering
+  mutate(variant_group = factor(variant_group, levels = c("Control", "Variant 1", "Variant 2", "Variant 3", "Variant 4"))) %>%
+  arrange(variant_group)
+
+engagement_by_variant_gt <- engagement_by_variant %>%
+  mutate(across(c(read_rate_pct, reply_rate_pct), ~ sprintf("%.1f%%", .x))) %>%
+  gt(rowname_col = "variant_group") %>%
+  tab_header(
+    title = md("**Engagement by Template Variant**"),
+    subtitle = md("Read and reply rates by variant")
+  )
+
+# --- 3) Hypothesis testing functions for two-proportion tests ---
+# test read rate: numerator = read_count, denominator = delivered_or_read
+prop_test_two <- function(x1, n1, x2, n2) {
+  # ensure valid denominators
+  if (n1 <= 0 || n2 <= 0) {
+    return(tibble(
+      estimate1 = NA_real_, estimate2 = NA_real_,
+      p.value = NA_real_, conf.low = NA_real_, conf.high = NA_real_,
+      method = "invalid"
+    ))
+  }
+  t <- prop.test(x = c(x1, x2), n = c(n1, n2), correct = FALSE)
+  broom::tidy(t) %>%
+    transmute(
+      estimate1 = t$estimate[1],
+      estimate2 = t$estimate[2],
+      p.value = p.value,
+      conf.low = conf.low,
+      conf.high = conf.high,
+      method = method
+    )
+}
+
+# --- 4) Tests: Intervention vs Control ---
+# read rate test
+int_vals <- engagement_summary %>% filter(group == "Intervention") %>% slice(1)
+ctrl_vals <- engagement_summary %>% filter(group == "Control") %>% slice(1)
+
+read_test_int_ctrl <- prop_test_two(
+  x1 = int_vals$read_count, n1 = int_vals$delivered_or_read,
+  x2 = ctrl_vals$read_count, n2 = ctrl_vals$delivered_or_read
+) %>%
+  mutate(metric = "Read rate", comparison = "Intervention vs Control")
+
+# reply test (denominator = total_messages)
+reply_test_int_ctrl <- prop_test_two(
+  x1 = int_vals$replied_count, n1 = int_vals$total_messages,
+  x2 = ctrl_vals$replied_count, n2 = ctrl_vals$total_messages
+) %>%
+  mutate(metric = "Reply rate", comparison = "Intervention vs Control")
+
+tests_int_ctrl <- bind_rows(read_test_int_ctrl, reply_test_int_ctrl) %>%
+  select(comparison, metric, everything())
+
+# --- 5) Variant vs Control pairwise tests (read and reply) ---
+# build a table of tests comparing each Variant to Control
+variant_tests <- engagement_by_variant %>%
+  filter(variant_group != "Control") %>%
+  group_by(variant = as.character(variant_group)) %>%
+  do({
+    v <- .
+    ctrl <- engagement_by_variant %>% filter(variant_group == "Control") %>% slice(1)
+    read_t <- prop_test_two(v$read_count, v$delivered_or_read, ctrl$read_count, ctrl$delivered_or_read)
+    reply_t <- prop_test_two(v$replied_count, v$total_messages, ctrl$replied_count, ctrl$total_messages)
+    bind_rows(
+      read_t %>% mutate(metric = "Read rate"),
+      reply_t %>% mutate(metric = "Reply rate")
+    ) %>%
+      mutate(variant = v$variant_group)
+  }) %>%
+  ungroup() %>%
+  select(variant, metric, everything())
+
+# --- 6) Make pretty GT tables for tests ---
+tests_int_ctrl_gt <- tests_int_ctrl %>%
+  mutate(
+    p.value = round(p.value, 4),
+    estimate1 = round(estimate1, 4),
+    estimate2 = round(estimate2, 4),
+    conf.low = round(conf.low, 4),
+    conf.high = round(conf.high, 4)
+  ) %>%
+  gt() %>%
+  tab_header(title = md("Hypothesis tests: Intervention vs Control")) %>%
+  cols_label(
+    comparison = "Comparison",
+    metric = "Metric",
+    estimate1 = "Estimate (Group 1)",
+    estimate2 = "Estimate (Group 2)",
+    p.value = "p-value",
+    conf.low = "95% CI low",
+    conf.high = "95% CI high"
+  )
+
+variant_tests_gt <- variant_tests %>%
+  mutate(
+    p.value = round(p.value, 4),
+    estimate1 = round(estimate1, 4),
+    estimate2 = round(estimate2, 4),
+    conf.low = round(conf.low, 4),
+    conf.high = round(conf.high, 4)
+  ) %>%
+  gt() %>%
+  tab_header(title = md("Hypothesis tests: Each Variant vs Control"))
+
+# --- 7️⃣ Display tables cleanly in the rendered report ---
+
+# 📊 Summary: Intervention vs Control
+engagement_summary_gt
+
+# 📊 Summary: Each Template Variant
+engagement_by_variant_gt
+
+# 🧪 Statistical Tests: Intervention vs Control
+tests_int_ctrl_gt
+
+# 🧪 Statistical Tests: Each Variant vs Control
+variant_tests_gt
+```
+
+## Failed Message Analysis
+
+```{r, echo = FALSE}
+# --- 1. Prepare data ---
+message <- message %>%
+  mutate(
+    `Sent At` = ymd_hms(`Sent At`, quiet = TRUE),
+    Status_clean = tolower(trimws(as.character(Status)))
+  )
+
+# --- 2. Summarize daily messages ---
+daily <- message %>%
+  mutate(date = as.Date(`Sent At`)) %>%
+  group_by(date) %>%
+  summarise(
+    total_sent = n(),
+    failed = sum(Status_clean %in% c("failed", "undelivered", "error"), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(date)
+
+# --- 3. Compute cumulative totals and failure rate ---
+daily <- daily %>%
+  mutate(
+    cum_total = cumsum(total_sent),
+    cum_failed = cumsum(failed),
+    failure_rate = 100 * cum_failed / cum_total
+  )
+
+# --- 4. Plot cumulative failure rate ---
+ggplot(daily, aes(x = date, y = failure_rate)) +
+  geom_line(color = "red", size = 1) +
+  geom_point(color = "red") +
+  labs(
+    title = "Cumulative Failure Rate of WA Messages (since 19 September 2025)",
+    x = "Date",
+    y = "Failure Rate (%)"
+  ) +
+  theme_minimal(base_size = 13)
+
+## Daily Failure Rate
+
+
+# --- 2. Summarise daily totals and failures ---
+daily <- message %>%
+  mutate(date = as.Date(`Sent At`)) %>%
+  group_by(date) %>%
+  summarise(
+    total_sent = n(),
+    failed = sum(Status_clean %in% c("failed", "undelivered", "error"), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    daily_failure_rate = 100 * failed / total_sent
+  )
+
+# --- 3. Plot daily failure rate ---
+ggplot(daily, aes(x = date, y = daily_failure_rate)) +
+  geom_line(color = "#0073C2FF", size = 1) +
+  geom_point(color = "#0073C2FF") +
+  labs(
+    title = "Daily Failure Rate of Messages (since 19/09/25)",
+    x = "Date",
+    y = "Failure Rate (%)"
+  ) +
+  theme_minimal(base_size = 13)
+
+message %>%
+  filter(!is.na(Notes) & Notes != "") %>%
+  count(Notes, sort = TRUE) %>%
+  mutate(
+    Notes = str_wrap(Notes, width = 60),        # wrap long text
+    percent = n / sum(n) * 100,                 # calculate percentage
+    label = paste0(n, " (", round(percent, 1), "%)")  # make label text
+  ) %>%
+  ggplot(aes(x = reorder(Notes, n), y = n)) +
+  geom_col(fill = "#E64B35FF") +
+  geom_text(aes(label = label), 
+            hjust = -0.1,                       # position labels outside bars
+            size = 4.2, 
+            color = "black") +
+  coord_flip() +
+  labs(
+    title = "Reason of Message Failure",
+    x = "Failure Reason",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 18, face = "bold"),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 12),
+    axis.title = element_text(size = 13),
+    plot.margin = margin(10, 40, 10, 10)       # extra right margin for labels
+  ) +
+  expand_limits(y = max(message %>% count(Notes) %>% pull(n)) * 1.15) # add space for labels
+
+```
+
+## Cohort 28 weeks contingency tables 2x2 and 2x5
+
+```{r}
+# ---  Keep only messages that were actually delivered or read ---
+message_exposed <- message %>%
+  filter(Status %in% c("Read", "Delivered"))
+
+merged <- inner_join(
+  encounter %>% select(phone_clean, visit_date),
+  message_exposed %>% select(phone_clean, Sent_At, Status),
+  by = "phone_clean"
+)
+
+# --- Calculate time difference (in hours) between message and visit ---
+merged <- merged %>%
+  mutate(
+    time_diff_hours = as.numeric(difftime(visit_date, Sent_At, units = "hours"))
+  )
+
+# --- Step 5: Keep encounters within 72 hours after message ---
+within_72h <- merged %>%
+  filter(time_diff_hours >= 0, time_diff_hours <= 72)
+
+# --- Step 6: Identify phone numbers that meet the condition ---
+phones_with_wa_related <- within_72h %>%
+  distinct(phone_clean) %>%
+  pull(phone_clean)
+
+# --- Step 7: Add logical flag to cohort28 ---
+cohort28 <- cohort28 %>%
+  mutate(
+    wa_related_encounter = phone_clean %in% phones_with_wa_related
+  )
+
+# --- Optional summary ---
+table(cohort28$wa_related_encounter)
+
+# --- Create has_received_msg ---
+has_received_msg_phones <- message %>%
+  filter(Status %in% c("Read", "Delivered")) %>%
+  distinct(phone_clean) %>%
+  pull(phone_clean)
+
+cohort28 <- cohort28 %>%
+  mutate(
+    has_received_msg = phone_clean %in% has_received_msg_phones
+  )
+
+```
+
+First scenario: contingency table with predefined wa_related_encounter (defined as 72 hours after message sent)
+
+```{r}
+# --- Contingency table 1: message exposure vs WA-related encounter ---
+tbl_wa <- table(
+  Message_Received = cohort28$has_received_msg,
+  WA_Related_Encounter = cohort28$wa_related_encounter
+)
+
+# Display table
+tbl_wa
+
+# --- Chi-square test ---
+chisq.test(tbl_wa)
+```
+
+Second scenario: message exposure vs any encounter
+
+```{r}
+# --- Contingency table 2: message exposure vs any encounter ---
+tbl_any <- table(
+  Message_Received = cohort28$has_received_msg,
+  Any_Encounter = cohort28$has_encounter
+)
+
+# Display table
+tbl_any
+
+# --- Chi-square test ---
+chisq.test(tbl_any)
+
+```
+
+Intervention vs control
+
+```{r}
+# --- Step 1: Create grouping variable ---
+cohort28 <- cohort28 %>%
+  mutate(
+    group_binary = if_else(cluster_no == 1, "Control", "Intervention")
+  )
+
+# --- Step 2: Create 2x2 contingency table ---
+tbl_interv_control <- table(
+  Group = cohort28$group_binary,
+  Any_Encounter = cohort28$has_encounter
+)
+
+tbl_interv_control
+
+# --- Step 5: Chi-square test ---
+chisq.test(tbl_interv_control)
+prop.table(tbl_interv_control, margin = 1) * 100  # Row percentages for 2x2
+
+```
+
+5 x 2 table
+
+```{r}
+
+# --- 5x2 table by cluster_no ---
+tbl_cluster <- table(
+  Cluster = cohort28$cluster_no,
+  Any_Encounter = cohort28$has_encounter
+)
+
+# --- View table ---
+tbl_cluster
+
+# --- Chi-square test across all 5 clusters ---
+chisq.test(tbl_cluster)
+prop.table(tbl_cluster, margin = 1) * 100        # Row percentages for 5x2
+```
+
+New definition cross table (The message + encounter - include those visits who have happened before the first message) - ANY MESSAGE VS ANY ENCOUNTER (WINDOW = 3 DAYS)
+
+```{r}
+# --- Step 1: Prepare clean message & encounter datasets ---
+df_msg <- message %>%
+  filter(Status %in% c("Delivered", "Read")) %>%
+  mutate(Sent_At = ymd_hms(`Sent At`, quiet = TRUE)) %>%
+  select(phone_clean, Sent_At)
+
+enc_df <- encounter %>%
+  mutate(visit_date = ymd(visit_date, quiet = TRUE)) %>%
+  select(phone_clean, visit_date)
+
+# --- Step 2: Define the window in days ---
+window_days <- 3
+
+# --- Step 3: Identify who had an encounter within the window ---
+msg_enc_window <- df_msg %>%
+  inner_join(enc_df, by = "phone_clean") %>%
+  mutate(diff_days = as.numeric(difftime(visit_date, Sent_At, units = "days"))) %>%
+  filter(diff_days >= 0, diff_days <= window_days) %>%
+  distinct(phone_clean) %>%
+  mutate(encounter_within_window = TRUE)
+
+# --- Step 4: Merge with cohort28 and classify all groups ---
+cohort_option2 <- cohort28 %>%
+  mutate(
+    has_message = phone_clean %in% (df_msg %>% distinct(phone_clean) %>% pull()),
+    has_encounter = phone_clean %in% (enc_df %>% distinct(phone_clean) %>% pull())
+  ) %>%
+  left_join(msg_enc_window, by = "phone_clean") %>%
+  mutate(encounter_within_window = replace_na(encounter_within_window, FALSE))
+
+# --- Step 5: Create 2×2 cross-table ---
+tbl_option2 <- table(
+  Message = cohort_option2$has_message,
+  Encounter_within_3days = cohort_option2$encounter_within_window
+)
+
+tbl_option2
+chisq.test(tbl_option2)
+
+```
+
+EARLIEST MESSAGE VS ANY ENCOUNTER
+
+```{r}
+# --- Step 1: Earliest valid message per person ---
+msg_earliest <- message %>%
+  filter(Status %in% c("Delivered", "Read")) %>%
+  mutate(Sent_At = ymd_hms(`Sent At`, quiet = TRUE)) %>%
+  group_by(phone_clean) %>%
+  summarise(first_msg = min(Sent_At, na.rm = TRUE), .groups = "drop")
+
+# --- Step 2: All encounters with dates ---
+enc_all <- encounter %>%
+  mutate(visit_date = ymd(visit_date, quiet = TRUE)) %>%
+  select(phone_clean, visit_date)
+
+# --- Step 3: For each person, check if ANY encounter is after earliest message ---
+enc_after_msg <- msg_earliest %>%
+  left_join(enc_all, by = "phone_clean") %>%
+  mutate(is_after = visit_date > first_msg) %>%
+  group_by(phone_clean) %>%
+  summarise(any_enc_after_msg = any(is_after, na.rm = TRUE), .groups = "drop")
+
+# --- Step 4: Merge with cohort and classify ---
+cohort_option1b <- cohort28 %>%
+  left_join(msg_earliest, by = "phone_clean") %>%
+  left_join(enc_after_msg, by = "phone_clean") %>%
+  mutate(
+    has_message = !is.na(first_msg),
+    has_encounter = phone_clean %in% encounter$phone_clean,
+    any_enc_after_msg = replace_na(any_enc_after_msg, FALSE)
+  )
+
+# --- Step 5: 2×2 table ---
+tbl_option1b <- table(
+  Message = cohort_option1b$has_message,
+  Encounter_after_message = cohort_option1b$any_enc_after_msg
+)
+
+tbl_option1b
+chisq.test(tbl_option1b)
+
+```
+
+EARLIEST MESSAGE VS EARLIEST ENCOUNTER
+
+```{r}
+# --- Step 1: Earliest valid (Delivered/Read) message per person ---
+msg_earliest <- message %>%
+  filter(Status %in% c("Delivered", "Read")) %>%
+  mutate(Sent_At = ymd_hms(`Sent At`, quiet = TRUE)) %>%
+  group_by(phone_clean) %>%
+  summarise(first_msg = min(Sent_At, na.rm = TRUE), .groups = "drop")
+
+# --- Step 2: Earliest encounter per person ---
+enc_earliest <- encounter %>%
+  mutate(visit_date = ymd(visit_date, quiet = TRUE)) %>%
+  group_by(phone_clean) %>%
+  summarise(first_enc = min(visit_date, na.rm = TRUE), .groups = "drop")
+
+# --- Step 3: Combine and classify 4 logical groups ---
+cohort_4cells <- cohort28 %>%
+  left_join(msg_earliest, by = "phone_clean") %>%
+  left_join(enc_earliest, by = "phone_clean") %>%
+  mutate(
+    has_message   = !is.na(first_msg),
+    has_encounter = !is.na(first_enc),
+    category = case_when(
+      # ① Message+ / Encounter+
+      has_message & has_encounter & first_enc > first_msg ~ "Message+ / Encounter+",
+      # ② Message+ / Encounter−
+      has_message & (!has_encounter | first_enc < first_msg) ~ "Message+ / Encounter−",
+      # ③ Message− / Encounter+
+      !has_message & has_encounter ~ "Message− / Encounter+",
+      # ④ Message− / Encounter−
+      !has_message & !has_encounter ~ "Message− / Encounter−",
+      TRUE ~ NA_character_
+    )
+  )
+
+# --- Step 4: Summarise counts per category ---
+summary_4cells <- cohort_4cells %>%
+  count(category) %>%
+  mutate(percent = round(100 * n / sum(n), 1))
+
+summary_4cells
+
+# --- Step 5: 2×2 cross-table + Chi-square test ---
+# --- Corrected encounter logic for the 2x2 table ---
+tbl_2x2 <- table(
+  Message = cohort_4cells$has_message,
+  Encounter = case_when(
+    # has encounter, and it's after their first message
+    cohort_4cells$has_encounter & cohort_4cells$has_message & 
+      cohort_4cells$first_enc > cohort_4cells$first_msg ~ TRUE,
+    # has encounter but no message at all
+    !cohort_4cells$has_message & cohort_4cells$has_encounter ~ TRUE,
+    TRUE ~ FALSE
+  )
+)
+
+tbl_2x2
+chisq.test(tbl_2x2)
+
+```
+
+ITT vs per-protocol
+
+```{r}
+# ITT (cluster-level randomized assignment)
+tbl_itt <- table(Group = cohort28$group_binary, Any_Encounter = cohort28$has_encounter)
+chisq.test(tbl_itt)
+
+# Per-protocol (actual message delivery, regardless of randomization)
+tbl_pp <- table(
+  Message = cohort_4cells$has_message,
+  Encounter = case_when(
+    # Case 1: Has message and visit after message
+    cohort_4cells$has_message & cohort_4cells$has_encounter & 
+      cohort_4cells$first_enc > cohort_4cells$first_msg ~ TRUE,
+    # Case 2: Has encounter but no message at all
+    !cohort_4cells$has_message & cohort_4cells$has_encounter ~ TRUE,
+    # Everyone else → no encounter after message
+    TRUE ~ FALSE
+  )
+)
+chisq.test(tbl_pp)
+
+tbl_itt
+tbl_pp
+
+```
+
+PP revised
+
+```{r}
+# --- Define earliest valid message per person ---
+msg_earliest <- message %>%
+  filter(Status %in% c("Delivered", "Read")) %>%
+  mutate(Sent_At = ymd_hms(`Sent At`, quiet = TRUE)) %>%
+  group_by(phone_clean) %>%
+  summarise(first_msg = min(Sent_At, na.rm = TRUE), .groups = "drop")
+
+# --- Define earliest encounter per person ---
+enc_earliest <- encounter %>%
+  mutate(visit_date = ymd(visit_date, quiet = TRUE)) %>%
+  group_by(phone_clean) %>%
+  summarise(first_enc = min(visit_date, na.rm = TRUE), .groups = "drop")
+
+# --- Merge and define exposure prospectively ---
+cohort_pp_fixed <- cohort28 %>%
+  left_join(msg_earliest, by = "phone_clean") %>%
+  left_join(enc_earliest, by = "phone_clean") %>%
+  mutate(
+    has_message   = !is.na(first_msg),
+    has_encounter = !is.na(first_enc),
+    # TRUE if person received a message *before the earliest encounter date or before censoring*
+    msg_before_visit = case_when(
+      has_message & has_encounter & first_msg < first_enc ~ TRUE,
+      has_message & !has_encounter ~ TRUE,  # message came but no visit recorded (still valid exposure)
+      TRUE ~ FALSE
+    )
+  )
+
+tbl_true_fixed <- table(
+  Message_before_visit = cohort_pp_fixed$msg_before_visit,
+  Any_Encounter = cohort_pp_fixed$has_encounter
+)
+tbl_true_fixed
+chisq.test(tbl_true_fixed)
+
+logistic1 <- glm(has_encounter ~ msg_before_visit + factor(cluster_no),
+      data = cohort_pp_fixed, family = binomial) %>% summary()
+```
+
+Visualization
+
+```{r}
+## INTERVAL TABLE
+# --- Prepare merged dataset (assuming it exists from earlier step) ---
+merged <- merged %>%
+  mutate(
+    time_diff_days = as.numeric(difftime(visit_date, Sent_At, units = "days"))
+  )
+
+ggplot(merged, aes(x = time_diff_days)) +
+  geom_histogram(
+    binwidth = 1,              # 1-day bins (adjust if too coarse/fine)
+    fill = "steelblue",
+    color = "white"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  labs(
+    title = "Distribution of Time Intervals Between Message and Encounter",
+    subtitle = "Negative values = visits before message; Positive values = visits after message",
+    x = "Time difference (days)",
+    y = "Frequency of message–encounter pairs"
+  ) +
+  theme_minimal(base_size = 13)
+
+## INTERVAL - UNIQUE PAIRS ONLY
+merged_unique <- merged %>%
+  mutate(
+    time_diff_days = as.numeric(difftime(visit_date, Sent_At, units = "days"))
+  ) %>%
+  group_by(phone_clean) %>%
+  slice_min(order_by = abs(time_diff_days), n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+ggplot(merged_unique, aes(x = time_diff_days)) +
+  geom_histogram(
+    binwidth = 1,
+    fill = "steelblue",
+    color = "white",
+    boundary = 0
+  ) +
+  geom_vline(
+    xintercept = 0,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  labs(
+    title = "Distribution of Closest Message–Encounter Intervals per Person",
+    subtitle = "Negative = visit before message, Positive = visit after message",
+    x = "Time difference (days)",
+    y = "Number of individuals"
+  ) +
+  theme_minimal(base_size = 13)
+
+## FIX FOR MULTIPLE ENCOUNTERS VISIT
+merged_fixed <- merged %>%
+  mutate(
+    time_diff_days = as.numeric(difftime(visit_date, Sent_At, units = "days"))
+  ) %>%
+  filter(time_diff_days >= 0) %>%            # keep only visits AFTER message
+  group_by(phone_clean, Sent_At) %>%         # for each message per person
+  slice_min(time_diff_days, n = 1, with_ties = FALSE) %>%  # keep the nearest one
+  ungroup()
+
+ggplot(merged_fixed, aes(x = time_diff_days)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "Distribution of Time Intervals (Filtered: Only Encounters After Message)",
+    subtitle = "Shows first subsequent encounter per message; negatives removed",
+    x = "Time difference (days)",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+
+# Additional Analysis: Creating New Tables for Pak Anu
+
+```{r, include = FALSE}
+cohort <- cohort %>%
+  mutate(
+    phone = phone %>%
+      # 1. Remove all non-digit characters just in case (spaces, +, -, etc.)
+      str_replace_all("[^0-9]", "") %>%
+      # 2. Remove leading "62" only if present at the start
+      str_replace("^62", "") %>%
+      # 3. Remove leading zeros added incorrectly (optional safety)
+      str_replace("^0+", ""),
+  )
+
+cohort_visit <- cohort %>%
+  # ensure date type and compute gestational age in weeks
+  mutate(
+    pregnancy_start.y = as.Date(pregnancy_start.y),
+    gestational_age_weeks = as.numeric(ref_date - pregnancy_start.y) / 7
+  ) %>%
+  # keep those with a non-missing, non-negative GA and GA < 40 weeks
+  filter(
+    !is.na(gestational_age_weeks),
+    gestational_age_weeks >= 0,
+    gestational_age_weeks < 28
+  )
+
+# ---- 1. Prepare cohort_visit ----
+cohort_visit <- cohort_visit %>%
+  select(
+    id,
+    nik,
+    birthDate,
+    pregnancy_start.x,
+    organization_name.x,
+    phone,
+    preg_group,
+    cluster_no
+  ) %>%
+  rename(
+    dob       = birthDate,         # Date of Birth
+    lmp       = pregnancy_start.x, # Last Menstrual Period
+    puskesmas = organization_name.x, # Puskesmas
+    notif_group = preg_group,        # Trimester
+    cluster   = cluster_no         # Intervention Cluster
+  )
+
+
+
+# ---- 2. Prepare message summary ----
+message_summary <- message %>%
+  # keep only valid phone numbers (not NA)
+  filter(!is.na(phone_clean)) %>%
+  # keep only phone numbers that exist in cohort$phone
+  filter(phone_clean %in% cohort_visit$phone) %>%
+  # group and summarise
+  group_by(phone_clean) %>%
+  summarise(message_no = n(), .groups = "drop")
+
+# ---- 3. Join with cohort_visit ----
+cohort_visit <- cohort_visit %>%
+  left_join(message_summary, by = c("phone" = "phone_clean")) %>%
+  mutate(
+    message_no = ifelse(is.na(message_no), 0, message_no)  # fill NAs with 0
+  )
+
+# ---- 4. Inspect result ----
+glimpse(cohort_visit)
+
+# ---- Prepare and recode message dataset ----
+message_processed <- message %>%
+  filter(phone_clean %in% cohort_visit$phone) %>%
+  mutate(
+    # Simplify status into logical TRUE/FALSE
+    msg_received = case_when(
+      Status_clean %in% c("delivered", "read")  ~ TRUE,
+      Status_clean %in% c("failed", "sent")     ~ FALSE,
+      TRUE ~ NA
+    )
+  ) %>%
+  arrange(phone_clean, Sent_At) %>%      # chronological (oldest first)
+  group_by(phone_clean) %>%
+  mutate(msg_order = row_number()) %>%   # message index per phone
+  ungroup()
+
+# ---- Pivot messages into wide format ----
+message_wide <- message_processed %>%
+  select(phone_clean, msg_order, Sent_At, msg_received) %>%
+  pivot_wider(
+    names_from = msg_order,
+    values_from = c(Sent_At, msg_received),
+    names_glue = "{.value}_{msg_order}"
+  ) %>%
+  # Rename columns so they become msg_date_x and msg_received_x
+  rename_with(
+    ~ gsub("^sent_at_", "msg_date_", .x),
+    starts_with("sent_at_")
+  ) %>%
+  rename_with(
+    ~ gsub("^msg_received_", "msg_received_", .x),
+    starts_with("msg_received_")
+  )
+
+# ---- Join with cohort_visit ----
+cohort_visit <- cohort_visit %>%
+  left_join(message_wide, by = c("phone" = "phone_clean"))
+
+# ---- Reorder columns neatly ----
+# Ensures msg_date_1, msg_received_1, msg_date_2, msg_received_2, ...
+msg_cols <- grep("^msg_", names(cohort_visit), value = TRUE)
+msg_cols <- msg_cols[order(as.numeric(gsub("\\D", "", msg_cols)))]
+base_cols <- names(cohort_visit)[!names(cohort_visit) %in% msg_cols]
+cohort_visit <- cohort_visit[, c(base_cols, msg_cols)]
+
+# ---- Inspect result ----
+glimpse(cohort_visit)
+
+encounter_f1 <- encounter %>%
+  # 1. Clean and validate phone numbers
+  filter(
+    !is.na(phone_clean),                             # remove NAs
+    str_detect(phone_clean, "^[0-9]+$"),             # only digits
+    nchar(phone_clean) >= 8,                         # realistic min length
+    nchar(phone_clean) <= 15,                        # ITU max length
+    !phone_clean %in% c(                             # remove known invalid/test numbers
+      "0000000000", "000000000", "00000000",
+      "800000000", "8000000000", "80000000000",
+      "89999999999", "80000000450", "12345678910",
+      "818550590", "999999999999", "89899999999", "99999999999"
+    )
+  ) %>%
+  
+  # 2. Ensure visit_date is proper POSIX datetime
+  mutate(
+    visit_date = as.POSIXct(visit_date, format = "%Y-%m-%d %H:%M:%S", tz = "Asia/Jakarta")
+  ) %>%
+  
+  # 3. Remove duplicate visits on the same date for the same phone
+  distinct(phone_clean, visit_date, .keep_all = TRUE)
+
+# ---- 2. Process encounter dataset ----
+encounter_processed <- encounter_f1 %>%
+  filter(!is.na(phone_clean)) %>%
+  mutate(
+    # Ensure visit date is POSIX datetime
+    visit_date = as.POSIXct(visit_date, format = "%Y-%m-%d %H:%M:%S", tz = "Asia/Jakarta")
+  ) %>%
+  arrange(phone_clean, visit_date) %>%        # chronological order
+  group_by(phone_clean) %>%
+  mutate(visit_order = row_number()) %>%      # index each visit per phone
+  ungroup()
+
+# ---- 3. Summarize number of visits ----
+visit_summary <- encounter_processed %>%
+  group_by(phone_clean) %>%
+  summarise(visit_no = n(), .groups = "drop")
+
+# ---- 4. Pivot visit dates to wide format ----
+visit_wide <- encounter_processed %>%
+  select(phone_clean, visit_order, visit_date) %>%
+  pivot_wider(
+    names_from = visit_order,
+    values_from = visit_date,
+    names_glue = "visit_date_{visit_order}"
+  )
+
+# ---- 5. Merge visit summary + wide dates ----
+encounter_wide <- visit_summary %>%
+  left_join(visit_wide, by = "phone_clean")
+
+# ---- 6. Join with cohort_visit ----
+cohort_visit <- cohort_visit %>%
+  left_join(encounter_wide, by = c("phone" = "phone_clean"))
+
+# ---- 7. Optional: reorder columns neatly ----
+base_cols <- names(cohort_visit)[!grepl("^visit_", names(cohort_visit))]
+visit_cols <- grep("^visit_", names(cohort_visit), value = TRUE)
+visit_cols <- visit_cols[order(as.numeric(gsub("\\D", "", visit_cols)))]
+cohort_visit <- cohort_visit[, c(base_cols, visit_cols)]
+
+# ---- 8. Inspect result ----
+glimpse(cohort_visit)
+```
+
+```{r, include = FALSE}
+
+
+# --- Compute intervals (in weeks) between LMP and each message ---
+cohort_visit <- cohort_visit %>%
+  mutate(
+    interval_days_1 = as.numeric(as.Date(Sent_At_1) - as.Date(lmp)),
+    interval_days_2 = as.numeric(as.Date(Sent_At_2) - as.Date(lmp)),
+    interval_days_3 = as.numeric(as.Date(Sent_At_3) - as.Date(lmp)),
+    interval_days_4 = as.numeric(as.Date(Sent_At_4) - as.Date(lmp)),
+    interval_days_5 = as.numeric(as.Date(Sent_At_5) - as.Date(lmp)),
+    interval_days_6 = as.numeric(as.Date(Sent_At_6) - as.Date(lmp))
+  )
+
+# weeks for each reminder
+weeks <- c(4,8,12,16,20,24,28,30,32,34,36,37,38,39,40)
+
+# days since LMP
+days_since_lmp <- weeks * 7
+
+# function: given lmp (Date), return vector of reminder Dates
+project_reminders <- function(lmp_date) {
+  as.Date(lmp_date) + days_since_lmp
+}
+
+cohort_visit <- cohort_visit %>%
+  rowwise() %>%
+  mutate(
+    schedule_1  = project_reminders(lmp)[1],
+    schedule_2  = project_reminders(lmp)[2],
+    schedule_3  = project_reminders(lmp)[3],
+    schedule_4  = project_reminders(lmp)[4],
+    schedule_5  = project_reminders(lmp)[5],
+    schedule_6  = project_reminders(lmp)[6],
+    schedule_7  = project_reminders(lmp)[7],
+    schedule_8  = project_reminders(lmp)[8],
+    schedule_9  = project_reminders(lmp)[9],
+    schedule_10 = project_reminders(lmp)[10],
+    schedule_11 = project_reminders(lmp)[11],
+    schedule_12 = project_reminders(lmp)[12],
+    schedule_13 = project_reminders(lmp)[13],
+    schedule_14 = project_reminders(lmp)[14],
+    schedule_15 = project_reminders(lmp)[15]
+  ) %>%
+  ungroup()
+
+# --- Optional: Summary statistics for each interval column ---
+interval_summary <- cohort_visit %>%
+  summarise(across(starts_with("interval_weeks_"), \(x) mean(x, na.rm = TRUE)))
+
+print(interval_summary)
+
+# --- Optional: check spread (SD) and counts ---
+interval_summary_detail <- cohort_visit %>%
+  summarise(across(starts_with("interval_weeks_"), list(
+    mean = ~mean(.x, na.rm = TRUE),
+    sd   = ~sd(.x, na.rm = TRUE),
+    n    = ~sum(!is.na(.x))
+  ), .names = "{.col}_{.fn}"))
+
+print(interval_summary_detail)
+
+# --- Save updated dataset (if you want to inspect intervals in Excel) ---
+write.csv(cohort_visit, "cohort_visit_with_intervals.csv", row.names = FALSE)
+
+```
+
+## Planned Encounter Table
+
+```{r, include = FALSE}
+# --- Define intervention period ---
+start_date <- as.Date("2025-09-19")
+end_date   <- as.Date("2025-10-19")
+
+# --- Identify all 15 schedule columns ---
+schedule_cols <- paste0("schedule_", 1:15)
+
+# --- Convert schedules to long format ---
+plan_encounters <- cohort_visit %>%
+  select(id, all_of(schedule_cols)) %>%
+  pivot_longer(
+    cols = all_of(schedule_cols),
+    names_to = "schedule_no",
+    values_to = "schedule_date"
+  ) %>%
+  # keep only those within the intervention window
+  filter(!is.na(schedule_date),
+         schedule_date >= start_date,
+         schedule_date <= end_date) %>%
+  arrange(id, schedule_date) %>%
+  group_by(id) %>%
+  # rank encounter dates per woman (plan_enc_1, plan_enc_2, etc.)
+  mutate(encounter_index = row_number()) %>%
+  ungroup() %>%
+  select(id, encounter_index, schedule_date) %>%
+  pivot_wider(
+    names_from = encounter_index,
+    values_from = schedule_date,
+    names_prefix = "plan_enc_"
+  )
+
+# --- Merge back to main dataset ---
+cohort_visit <- cohort_visit %>%
+  left_join(plan_encounters, by = "id")
+
+
+```
+
+## Case study: Planned encounter 20 September 2025
+
+```{r}
+# ---- PARAMETERS ----
+# Define outcome window (+1 to +3 days after message)
+outcome_days <- 1:3
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+
+# ---- DEFINE VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)           # up to 4 planned encounters
+visit_cols <- paste0("visit_date_", 1:6)        # actual recorded visits
+msg_cols <- paste0("msg_received_", 1:6)        # message receipt flags
+
+# ---- CONVERT ALL DATES TO DATE CLASS ----
+cohort_visit <- cohort_visit %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT FOR VISITS ----
+visits_long <- cohort_visit %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT FOR PLAN ENCOUNTERS ----
+plans_long <- cohort_visit %>%
+  select(id, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG OUTCOME ----
+# For each plan_enc_x, find if any visit falls within +1 to +3 days
+plans_outcome <- plans_long %>%
+  left_join(visits_long, by = "id") %>%
+  mutate(
+    visit_within_3days = visit_date >= plan_date + days(1) &
+                         visit_date <= plan_date + days(3)
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    outcome = any(visit_within_3days, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT (exposure) ----
+# We'll assume msg_received_1 corresponds to the first plan_enc, etc.
+# Adjust mapping logic if your numbering differs.
+plans_outcome <- plans_outcome %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(cols = all_of(msg_cols),
+                   names_to = "msg_col",
+                   values_to = "msg_received"),
+    by = c("id", "msg_col")
+  )
+
+# ---- Summary: number of planned encounters per woman within intervention period ----
+
+plan_count_summary <- plans_outcome %>%
+  group_by(id) %>%
+  summarise(n_plan_encounters = n(), .groups = "drop") %>%
+  arrange(desc(n_plan_encounters))
+
+# View breakdown
+print(plan_count_summary)
+
+# ---- Quick descriptive stats ----
+summary_stats <- plan_count_summary %>%
+  summarise(
+    total_women = n(),
+    total_encounters = sum(n_plan_encounters),
+    mean_per_woman = mean(n_plan_encounters),
+    median_per_woman = median(n_plan_encounters),
+    sd_per_woman = sd(n_plan_encounters),
+    min_per_woman = min(n_plan_encounters),
+    max_per_woman = max(n_plan_encounters)
+  )
+
+print(summary_stats)
+
+# ---- Optional: frequency table of how many women had 1, 2, 3, 4 planned encounters ----
+freq_table <- plan_count_summary %>%
+  count(n_plan_encounters, name = "n_women") %>%
+  mutate(percent = n_women / sum(n_women) * 100)
+
+print(freq_table)
+
+
+# ---- 2x2 CONTINGENCY TABLE ----
+contingency <- plans_outcome %>%
+  mutate(
+    msg_received = ifelse(is.na(msg_received), FALSE, msg_received),
+    outcome = ifelse(outcome, TRUE, FALSE)
+  ) %>%
+  group_by(msg_received, outcome) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(msg_received = c(FALSE, TRUE),
+                  outcome = c(FALSE, TRUE),
+                  fill = list(n = 0))
+
+print(contingency)
+
+# ---- Optional: formatted 2x2 table view ----
+contingency_table <- contingency %>%
+  pivot_wider(names_from = outcome,
+              values_from = n,
+              names_prefix = "Outcome_") %>%
+  rename(
+    `Message Received` = msg_received,
+    `No Visit (0)` = Outcome_FALSE,
+    `Visit Within 3 Days (1)` = Outcome_TRUE
+  )
+
+print(contingency_table)
+chisq.test(contingency_table)
+
+# Define contingency table
+a <- 22  # Exposed & Visit
+b <- 560 # Exposed & No visit
+c <- 10  # Unexposed & Visit
+d <- 349 # Unexposed & No visit
+
+# Build matrix: rows = exposure, columns = outcome
+matrix_counts <- matrix(c(a, b, c, d),
+                        nrow = 2,
+                        byrow = TRUE,
+                        dimnames = list(
+                          "MessageReceived" = c("TRUE", "FALSE"),
+                          "VisitWithin3Days" = c("Yes", "No")
+                        ))
+
+```
+
+## Seven Days Scenario
+
+```{r, include = FALSE}
+
+# ---- PARAMETERS ----
+# Define outcome window (+1 to +7 days after message)
+outcome_days_7d <- 1:7
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+
+# ---- DEFINE VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)           # up to 3 planned encounters
+visit_cols <- paste0("visit_date_", 1:6)        # actual recorded visits
+msg_cols <- paste0("msg_received_", 1:6)        # message receipt flags
+
+# ---- CONVERT ALL DATES TO DATE CLASS ----
+cohort_visit <- cohort_visit %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT FOR VISITS ----
+visits_long_7d <- cohort_visit %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT FOR PLAN ENCOUNTERS ----
+plans_long_7d <- cohort_visit %>%
+  select(id, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG OUTCOME ----
+# For each plan_enc_x, find if any visit falls within +1 to +7 days
+plans_outcome_7d <- plans_long_7d %>%
+  left_join(visits_long_7d, by = "id") %>%
+  mutate(
+    visit_within_7days = visit_date >= plan_date + days(1) &
+                         visit_date <= plan_date + days(7)
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    outcome_7d = any(visit_within_7days, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT (exposure) ----
+plans_outcome_7d <- plans_outcome_7d %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(
+        cols = all_of(msg_cols),
+        names_to = "msg_col",
+        values_to = "msg_received_7d"
+      ),
+    by = c("id", "msg_col")
+  )
+
+# ---- Summary: number of planned encounters per woman (7-day window) ----
+plan_count_summary_7d <- plans_outcome_7d %>%
+  group_by(id) %>%
+  summarise(n_plan_encounters_7d = n(), .groups = "drop") %>%
+  arrange(desc(n_plan_encounters_7d))
+
+print(plan_count_summary_7d)
+
+# ---- Quick descriptive stats ----
+summary_stats_7d <- plan_count_summary_7d %>%
+  summarise(
+    total_women = n(),
+    total_encounters_7d = sum(n_plan_encounters_7d),
+    mean_per_woman = mean(n_plan_encounters_7d),
+    median_per_woman = median(n_plan_encounters_7d),
+    sd_per_woman = sd(n_plan_encounters_7d),
+    min_per_woman = min(n_plan_encounters_7d),
+    max_per_woman = max(n_plan_encounters_7d)
+  )
+
+print(summary_stats_7d)
+
+# ---- Frequency table of planned encounters (7-day window) ----
+freq_table_7d <- plan_count_summary_7d %>%
+  count(n_plan_encounters_7d, name = "n_women") %>%
+  mutate(percent = n_women / sum(n_women) * 100)
+
+print(freq_table_7d)
+
+# ---- 2x2 CONTINGENCY TABLE (7-day outcome) ----
+contingency_7d <- plans_outcome_7d %>%
+  mutate(
+    msg_received_7d = ifelse(is.na(msg_received_7d), FALSE, msg_received_7d),
+    outcome_7d = ifelse(outcome_7d, TRUE, FALSE)
+  ) %>%
+  group_by(msg_received_7d, outcome_7d) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(
+    msg_received_7d = c(FALSE, TRUE),
+    outcome_7d = c(FALSE, TRUE),
+    fill = list(n = 0)
+  )
+
+print(contingency_7d)
+
+# ---- Optional: formatted 2x2 table view (7-day window) ----
+contingency_7d_table <- contingency_7d %>%
+  pivot_wider(
+    names_from = outcome_7d,
+    values_from = n,
+    names_prefix = "Outcome_"
+  ) %>%
+  rename(
+    `Message Received` = msg_received_7d,
+    `No Visit (0)` = Outcome_FALSE,
+    `Visit Within 7 Days (1)` = Outcome_TRUE
+  )
+
+print(contingency_7d_table)
+
+# ---- Run Chi-square test on 7-day table ----
+# Convert contingency_7d into matrix form
+chi_matrix_7d <- contingency_7d %>%
+  arrange(msg_received_7d, outcome_7d) %>%
+  pivot_wider(
+    names_from = outcome_7d,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  select(-msg_received_7d) %>%
+  as.matrix()
+
+chi_result_7d <- chisq.test(chi_matrix_7d, correct = FALSE)
+
+# ---- Print results ----
+print(chi_matrix_7d)
+print(chi_result_7d)
+```
+
+## Nested cross table (5 x 2), outcome 3 days after message
+
+```{r}
+# ---- Filter only women who received the message (TRUE) ----
+plans_outcome_received <- plans_outcome %>%
+  filter(msg_received == TRUE)
+
+# ---- Join cluster info ----
+plans_outcome_received <- plans_outcome_received %>%
+  left_join(
+    cohort_visit %>% select(id, cluster),
+    by = "id"
+  )
+
+# ---- Create cluster-level cross-tab (Message Received = TRUE only) ----
+cross_table_cluster <- plans_outcome_received %>%
+  group_by(cluster, outcome) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(cluster, outcome = c(FALSE, TRUE), fill = list(n = 0)) %>%
+  group_by(cluster) %>%
+  mutate(
+    total = sum(n),
+    percent = round((n / total) * 100, 1)
+  ) %>%
+  ungroup()
+
+# ---- Pivot wider for a readable format ----
+cross_table_cluster_wide <- cross_table_cluster %>%
+  pivot_wider(
+    names_from = outcome,
+    values_from = c(n, percent),
+    names_glue = "{.value}_outcome_{outcome}"
+  ) %>%
+  rename(
+    `No Visit (0)` = n_outcome_FALSE,
+    `Visit Within 3 Days (1)` = n_outcome_TRUE,
+    `% No Visit (0)` = percent_outcome_FALSE,
+    `% Visit Within 3 Days (1)` = percent_outcome_TRUE
+  )
+
+# ---- Display results ----
+print(cross_table_cluster_wide)
+
+# ---- Build cluster x outcome contingency table (for received messages only) ----
+chi_cluster_matrix <- plans_outcome_received %>%
+  count(cluster, outcome) %>%
+  pivot_wider(
+    names_from = outcome,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  column_to_rownames("cluster") %>%
+  as.matrix()
+
+# ---- Run Chi-square test ----
+chi_cluster_result <- chisq.test(chi_cluster_matrix, correct = FALSE)
+
+# ---- Display outputs ----
+print(chi_cluster_matrix)
+print(chi_cluster_result)
+
+# ---- Optional: Extract observed & expected counts ----
+chi_cluster_result$observed
+chi_cluster_result$expected
+```
+
+## 1 day after
+
+```{r}
+# ---- PARAMETERS ----
+# Define outcome window (exactly +1 day after message)
+outcome_days_1d <- 1
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+
+# ---- DEFINE VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)           # up to 3 planned encounters
+visit_cols <- paste0("visit_date_", 1:6)        # actual recorded visits
+msg_cols <- paste0("msg_received_", 1:6)        # message receipt flags
+
+# ---- CONVERT ALL DATES TO DATE CLASS ----
+cohort_visit <- cohort_visit %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT FOR VISITS ----
+visits_long_1d <- cohort_visit %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT FOR PLAN ENCOUNTERS ----
+plans_long_1d <- cohort_visit %>%
+  select(id, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG OUTCOME ----
+# Outcome = Visit exactly +1 day after message
+plans_outcome_1d <- plans_long_1d %>%
+  left_join(visits_long_1d, by = "id") %>%
+  mutate(
+    visit_within_1day = as.Date(visit_date) == as.Date(plan_date + days(1))
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    outcome_1d = any(visit_within_1day, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT (exposure) ----
+plans_outcome_1d <- plans_outcome_1d %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(
+        cols = all_of(msg_cols),
+        names_to = "msg_col",
+        values_to = "msg_received_1d"
+      ),
+    by = c("id", "msg_col")
+  )
+
+# ---- 2x2 CONTINGENCY TABLE (Outcome = visit on next day) ----
+contingency_1d <- plans_outcome_1d %>%
+  mutate(
+    msg_received_1d = ifelse(is.na(msg_received_1d), FALSE, msg_received_1d),
+    outcome_1d = ifelse(outcome_1d, TRUE, FALSE)
+  ) %>%
+  group_by(msg_received_1d, outcome_1d) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(
+    msg_received_1d = c(FALSE, TRUE),
+    outcome_1d = c(FALSE, TRUE),
+    fill = list(n = 0)
+  )
+
+print(contingency_1d)
+
+# ---- Optional: formatted 2x2 table view ----
+contingency_1d_table <- contingency_1d %>%
+  pivot_wider(
+    names_from = outcome_1d,
+    values_from = n,
+    names_prefix = "Outcome_"
+  ) %>%
+  rename(
+    `Message Received` = msg_received_1d,
+    `No Visit (0)` = Outcome_FALSE,
+    `Visit 1 Day After (1)` = Outcome_TRUE
+  )
+
+print(contingency_1d_table)
+
+# ---- Chi-square test ----
+chi_matrix_1d <- contingency_1d %>%
+  arrange(msg_received_1d, outcome_1d) %>%
+  pivot_wider(
+    names_from = outcome_1d,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  select(-msg_received_1d) %>%
+  as.matrix()
+
+chi_result_1d <- chisq.test(chi_matrix_1d, correct = FALSE)
+
+# ---- Display results ----
+print(chi_matrix_1d)
+print(chi_result_1d)
+
+```
+
+## GT Visualization
+
+```{r, include= FALSE}
+library(gt)
+library(dplyr)
+library(tidyr)
+library(glue)
+
+# =========================
+# 1️⃣  3-DAY WINDOW RESULTS
+# =========================
+
+contingency_3d_fmt <- contingency %>%
+  group_by(msg_received) %>%
+  mutate(
+    row_total = sum(n),
+    row_pct = round((n / row_total) * 100, 1),
+    cell_text = glue("{n} ({row_pct}%)")
+  ) %>%
+  select(msg_received, outcome, cell_text) %>%
+  pivot_wider(names_from = outcome, values_from = cell_text) %>%
+  ungroup() %>%
+  mutate(`Message Received` = ifelse(msg_received, "TRUE", "FALSE")) %>%
+  select(`Message Received`, `FALSE`, `TRUE`) %>%
+  rename(
+    `No Visit (0)` = `FALSE`,
+    `Visit Within 3 Days (1)` = `TRUE`
+  )
+
+chi_matrix_3d <- contingency %>%
+  arrange(msg_received, outcome) %>%
+  pivot_wider(names_from = outcome, values_from = n) %>%
+  select(-msg_received) %>%
+  as.matrix()
+chi_result_3d <- chisq.test(chi_matrix_3d, correct = FALSE)
+
+gt_3d <- contingency_3d_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visits Within 2 Days After Planned Encounter Date**"),
+    subtitle = "Intervention period: 19 Sep – 19 Oct 2025"
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test: X² = {round(chi_result_3d$statistic, 3)}, ",
+      "df = {chi_result_3d$parameter}, ",
+      "p = {round(chi_result_3d$p.value, 4)}"
+    )
+  )
+
+
+# =========================
+# 2️⃣  7-DAY WINDOW RESULTS
+# =========================
+
+contingency_7d_fmt <- contingency_7d %>%
+  group_by(msg_received_7d) %>%
+  mutate(
+    row_total = sum(n),
+    row_pct = round((n / row_total) * 100, 1),
+    cell_text = glue("{n} ({row_pct}%)")
+  ) %>%
+  select(msg_received_7d, outcome_7d, cell_text) %>%
+  pivot_wider(names_from = outcome_7d, values_from = cell_text) %>%
+  ungroup() %>%
+  mutate(`Message Received` = ifelse(msg_received_7d, "TRUE", "FALSE")) %>%
+  select(`Message Received`, `FALSE`, `TRUE`) %>%
+  rename(
+    `No Visit (0)` = `FALSE`,
+    `Visit Within 7 Days (1)` = `TRUE`
+  )
+
+chi_matrix_7d <- contingency_7d %>%
+  arrange(msg_received_7d, outcome_7d) %>%
+  pivot_wider(names_from = outcome_7d, values_from = n) %>%
+  select(-msg_received_7d) %>%
+  as.matrix()
+chi_result_7d <- chisq.test(chi_matrix_7d, correct = FALSE)
+
+gt_7d <- contingency_7d_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visits Within 6 Days After Planned Encounter Date**"),
+    subtitle = "Intervention period: 19 Sep – 19 Oct 2025"
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test: X² = {round(chi_result_7d$statistic, 3)}, ",
+      "df = {chi_result_7d$parameter}, ",
+      "p = {round(chi_result_7d$p.value, 4)}"
+    )
+  )
+
+
+# =========================
+# 3️⃣  CLUSTER-LEVEL RESULTS
+# =========================
+
+cross_table_cluster_fmt <- cross_table_cluster_wide %>%
+  mutate(
+    `Row Total` = `No Visit (0)` + `Visit Within 3 Days (1)`,
+    `No Visit (0)` = glue("{`No Visit (0)`} ({round(`No Visit (0)` / `Row Total` * 100, 1)}%)"),
+    `Visit Within 3 Days (1)` = glue("{`Visit Within 3 Days (1)`} ({round(`Visit Within 3 Days (1)` / `Row Total` * 100, 1)}%)")
+  ) %>%
+  select(cluster, `No Visit (0)`, `Visit Within 3 Days (1)`)
+
+chi_cluster_matrix <- plans_outcome_received %>%
+  count(cluster, outcome) %>%
+  pivot_wider(names_from = outcome, values_from = n, values_fill = 0) %>%
+  column_to_rownames("cluster") %>%
+  as.matrix()
+chi_cluster_result <- chisq.test(chi_cluster_matrix, correct = FALSE)
+
+cross_table_cluster_gt <- cross_table_cluster_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visit Outcomes by Intervention Cluster (Received Only)**"),
+    subtitle = "Among women who received the message; outcome = visit within 2 days since planned encounter date"
+  ) %>%
+  cols_label(cluster = "Cluster") %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test across clusters: X² = {round(chi_cluster_result$statistic, 3)}, ",
+      "df = {chi_cluster_result$parameter}, ",
+      "p = {round(chi_cluster_result$p.value, 4)}"
+    )
+  )
+
+# =========================
+# 4️⃣  1-DAY WINDOW RESULTS
+# =========================
+
+# ---- Format table for presentation ----
+contingency_1d_fmt <- contingency_1d %>%
+  group_by(msg_received_1d) %>%
+  mutate(
+    row_total = sum(n),
+    row_pct = round((n / row_total) * 100, 1),
+    cell_text = glue("{n} ({row_pct}%)")
+  ) %>%
+  select(msg_received_1d, outcome_1d, cell_text) %>%
+  pivot_wider(names_from = outcome_1d, values_from = cell_text) %>%
+  ungroup() %>%   # remove grouping to avoid duplicate headers
+  mutate(
+    `Message Received` = ifelse(msg_received_1d, "TRUE", "FALSE")
+  ) %>%
+  select(`Message Received`, `FALSE`, `TRUE`) %>%
+  rename(
+    `No Visit (0)` = `FALSE`,
+    `Visit 1 Day After (1)` = `TRUE`
+  )
+
+# ---- Run Chi-square test ----
+chi_matrix_1d <- contingency_1d %>%
+  arrange(msg_received_1d, outcome_1d) %>%
+  pivot_wider(names_from = outcome_1d, values_from = n) %>%
+  select(-msg_received_1d) %>%
+  as.matrix()
+chi_result_1d <- chisq.test(chi_matrix_1d, correct = FALSE)
+
+# ---- Build gt table ----
+gt_1d <- contingency_1d_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visits Exactly At Planned Encounter Date**"),
+    subtitle = "Intervention period: 19 Sep – 19 Oct 2025"
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test: X² = {round(chi_result_1d$statistic, 3)}, ",
+      "df = {chi_result_1d$parameter}, ",
+      "p = {round(chi_result_1d$p.value, 4)}"
+    )
+  )
+
+# ---- Display clean table ----
+gt_1d
+
+# =========================
+# ✅ DISPLAY ALL GT TABLES
+# =========================
+gt_3d
+gt_7d
+cross_table_cluster_gt
+gt_1d
+
+# 1️⃣  3-Day Table
+gtsave(
+  data = gt_3d,
+  filename = "ANC_3day_table_v2.png",
+  vwidth = 1000,
+  vheight = 500,
+  zoom = 2
+)
+
+# 2️⃣  7-Day Table
+gtsave(
+  data = gt_7d,
+  filename = "ANC_7day_table_v2.png",
+  vwidth = 1000,
+  vheight = 500,
+  zoom = 2
+)
+
+# 3️⃣  Cluster Table
+gtsave(
+  data = cross_table_cluster_gt,
+  filename = "ANC_cluster_table_v2.png",
+  vwidth = 1200,
+  vheight = 600,
+  zoom = 2
+)
+
+# 4️⃣  1-Day Table
+gtsave(
+  data = gt_1d,
+  filename = "ANC_1day_table_v2.png",
+  vwidth = 1000,
+  vheight = 500,
+  zoom = 2
+)
+```
+
+# Additional Analysis (21 October 2025)
+
+```{r}
+id_col <- "phone"
+planned_cols <- c("plan_enc_1", "plan_enc_2", "plan_enc_3")
+visit_cols   <- paste0("visit_date_", 1:6)
+
+# --- Reshape planned and visit dates to long ---
+plans_long <- cohort_visit %>%
+  select(all_of(c(id_col, planned_cols))) %>%
+  pivot_longer(
+    cols = all_of(planned_cols),
+    names_to = "plan_encounter",
+    values_to = "planned_date"
+  )
+
+visits_long <- cohort_visit %>%
+  select(all_of(c(id_col, visit_cols))) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_instance",
+    values_to = "visit_date"
+  )
+
+# --- Convert to Date and filter valid pairs ---
+plans_long <- plans_long %>% mutate(planned_date = ymd(planned_date))
+visits_long <- visits_long %>% mutate(visit_date = ymd(visit_date))
+
+# --- Define intervention period ---
+intervention_start <- ymd("2025-09-19")
+intervention_end   <- ymd("2025-10-19")
+
+# --- Join and keep valid pairs only within intervention period ---
+plan_visit_pairs <- plans_long %>%
+  inner_join(visits_long, by = id_col) %>%
+  filter(!is.na(planned_date), !is.na(visit_date)) %>%
+  filter(visit_date >= planned_date) %>%
+  filter(visit_date >= intervention_start & visit_date <= intervention_end) %>%
+  mutate(time_diff_days = as.numeric(difftime(visit_date, planned_date, units = "days")))
+
+# --- Keep only the *latest* plan before each visit (avoid double counting) ---
+plan_visit_nearest <- plan_visit_pairs %>%
+  group_by(across(all_of(c(id_col, "visit_date", "visit_instance")))) %>%
+  slice_min(time_diff_days, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# --- Compute summary stats ---
+n_total <- nrow(plan_visit_nearest)
+summary_stats <- plan_visit_nearest %>%
+  summarise(
+    mean_delay = mean(time_diff_days, na.rm = TRUE),
+    median_delay = median(time_diff_days, na.rm = TRUE),
+    p90_delay = quantile(time_diff_days, 0.9, na.rm = TRUE)
+  )
+
+# --- Prepare histogram data with counts for labels ---
+hist_data <- plan_visit_nearest %>%
+  mutate(bin = cut(time_diff_days, breaks = seq(-0.5, max(time_diff_days, na.rm = TRUE) + 0.5, by = 1))) %>%
+  count(bin) %>%
+  mutate(mid = as.numeric(sub("\\((.+),.*", "\\1", bin)) + 0.5)
+
+# --- Plot histogram with bar labels and total n ---
+ggplot(plan_visit_nearest, aes(x = time_diff_days)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  geom_text(
+    data = hist_data,
+    aes(x = mid, y = n, label = n),
+    vjust = -0.3, size = 3.2, color = "black"
+  ) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "Delays Between Latest Planned Encounter and Actual Visit",
+    subtitle = paste0(
+      "Restricted to visits during intervention period (19 Sep–19 Oct 2025); ",
+      "n = ", n_total,
+      " (Mean delay = ", round(summary_stats$mean_delay, 1), "d; ",
+      "Median = ", round(summary_stats$median_delay, 1), "d)"
+    ),
+    x = "Delay (days)",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    panel.grid.minor = element_blank()
+  )
+
+### ------------------------------------------------------------------------------------------------
+
+id_col <- "phone"
+planned_cols <- c("plan_enc_1", "plan_enc_2", "plan_enc_3")
+visit_cols   <- paste0("visit_date_", 1:6)
+
+# --- Define intervention period ---
+intervention_start <- ymd("2025-09-19")
+intervention_end   <- ymd("2025-10-19")
+
+# --- Prepare planned and actual encounter data ---
+plans_long <- cohort_visit %>%
+  select(all_of(c(id_col, planned_cols))) %>%
+  pivot_longer(
+    cols = all_of(planned_cols),
+    names_to = "plan_encounter",
+    values_to = "planned_date"
+  ) %>%
+  mutate(planned_date = ymd(planned_date))
+
+visits_long <- cohort_visit %>%
+  select(all_of(c(id_col, visit_cols))) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_instance",
+    values_to = "visit_date"
+  ) %>%
+  mutate(visit_date = ymd(visit_date)) %>%
+  filter(!is.na(visit_date)) %>%
+  filter(visit_date >= intervention_start & visit_date <= intervention_end)
+
+# --- Pair every visit with all planned encounters for same participant ---
+plan_visit_pairs <- plans_long %>%
+  inner_join(visits_long, by = id_col) %>%
+  filter(!is.na(planned_date)) %>%
+  mutate(time_diff_days = as.numeric(difftime(visit_date, planned_date, units = "days")))
+
+# --- For each visit, keep the *closest* planned encounter (before OR after) ---
+plan_visit_nearest <- plan_visit_pairs %>%
+  group_by(across(all_of(c(id_col, "visit_date", "visit_instance")))) %>%
+  slice_min(abs(time_diff_days), n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# --- Sanity check: should equal total visits in intervention period ---
+n_total <- nrow(plan_visit_nearest)
+
+# --- Summary stats ---
+summary_stats <- plan_visit_nearest %>%
+  summarise(
+    mean_delay = mean(time_diff_days, na.rm = TRUE),
+    median_delay = median(time_diff_days, na.rm = TRUE),
+    sd_delay = sd(time_diff_days, na.rm = TRUE)
+  )
+
+# --- Prepare bins and counts for labels ---
+hist_data <- plan_visit_nearest %>%
+  mutate(bin = cut(time_diff_days, breaks = seq(floor(min(time_diff_days, na.rm = TRUE) - 0.5),
+                                                ceiling(max(time_diff_days, na.rm = TRUE) + 0.5), by = 1))) %>%
+  count(bin) %>%
+  mutate(mid = as.numeric(sub("\\((.+),.*", "\\1", bin)) + 0.5)
+
+# --- Plot histogram (negative = before planned date; positive = after) ---
+ggplot(plan_visit_nearest, aes(x = time_diff_days)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  geom_text(
+    data = hist_data,
+    aes(x = mid, y = n, label = n),
+    vjust = -0.3, size = 3.2, color = "black"
+  ) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "Delays Between Actual Encounters and Nearest Planned Encounter",
+    subtitle = paste0(
+      "All visits during intervention period (19 Sep–19 Oct 2025); ",
+      "n = ", n_total,
+      " (Mean = ", round(summary_stats$mean_delay, 1), "d; ",
+      "Median = ", round(summary_stats$median_delay, 1), "d)"
+    ),
+    x = "Delay (days; negative = before plan, positive = after plan)",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+## Filtered Dataset (Unique Phone Numbers Only)
+
+```{r}
+# Count number of occurrences per phone
+dup_summary <- cohort_visit %>%
+  group_by(phone) %>%
+  summarise(n_records = n()) %>%
+  arrange(desc(n_records))
+
+# See how many phones are duplicated
+dup_summary %>%
+  summarise(
+    total_unique_phones = n(),
+    duplicated_phones = sum(n_records > 1),
+    total_rows = sum(n_records)
+  )
+
+# Optional: view examples of duplicates
+cohort_visit %>%
+  filter(phone %in% dup_summary$phone[dup_summary$n_records > 1]) %>%
+  arrange(phone)
+
+# Function to count non-missing key fields
+key_cols <- c("lmp", "plan_enc_1", "plan_enc_2", "plan_enc_3",
+              "visit_date_1", "visit_date_2", "visit_date_3",
+              "visit_date_4", "visit_date_5", "visit_date_6")
+
+cohort_visit_new <- cohort_visit %>%
+  mutate(non_missing_count = rowSums(!is.na(select(., all_of(key_cols))))) %>%
+  group_by(phone) %>%
+  arrange(desc(non_missing_count), lmp, .by_group = TRUE) %>%
+  slice(1) %>%             # keep best record per phone
+  ungroup() %>%
+  select(-non_missing_count)
+
+# Confirm uniqueness
+cohort_visit_new %>%
+  summarise(
+    total_rows = n(),
+    unique_phones = n_distinct(phone),
+    duplicated_phones = sum(duplicated(phone))
+  )
+
+
+# -------------------------------------
+
+# --- Define intervention period ---
+intervention_start <- ymd("2025-09-19")
+intervention_end   <- ymd("2025-10-19")
+
+# --- Planned encounters (plan_enc_1 to plan_enc_3) ---
+planned_cols <- c("plan_enc_1", "plan_enc_2", "plan_enc_3")
+
+planned_in_period <- cohort_visit_new %>%
+  pivot_longer(
+    cols = all_of(planned_cols),
+    names_to = "plan_encounter",
+    values_to = "planned_date"
+  ) %>%
+  mutate(planned_date = ymd(planned_date)) %>%
+  filter(
+    !is.na(planned_date),
+    planned_date >= intervention_start,
+    planned_date <= intervention_end
+  )
+
+total_planned_in_period <- nrow(planned_in_period)
+
+# --- Actual encounters (visit_date_1 to visit_date_6) ---
+visit_cols <- paste0("visit_date_", 1:6)
+
+visits_in_period <- cohort_visit_new %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_instance",
+    values_to = "visit_date"
+  ) %>%
+  mutate(visit_date = ymd(visit_date)) %>%
+  filter(
+    !is.na(visit_date),
+    visit_date >= intervention_start,
+    visit_date <= intervention_end
+  )
+
+total_visits_in_period <- nrow(visits_in_period)
+
+# --- Display results ---
+cat("📅 Intervention period:", intervention_start, "to", intervention_end, "\n")
+cat("✅ Total planned encounters in period:", total_planned_in_period, "\n")
+cat("✅ Total actual encounters in period:", total_visits_in_period, "\n")
+```
+
+### 2 x 2contingency table (2 days since planned encounter)
+
+```{r}
+# ---- PARAMETERS ----
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+outcome_days <- 0:2   # same day + next 2 days
+
+# ---- DEFINE VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)
+visit_cols <- paste0("visit_date_", 1:6)
+msg_cols <- paste0("msg_received_", 1:6)
+
+# ---- CONVERT DATE COLUMNS ----
+cohort_visit_new <- cohort_visit_new %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT: VISITS ----
+visits_long <- cohort_visit_new %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT: PLANNED ENCOUNTERS ----
+plans_long <- cohort_visit_new %>%
+  select(id, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG OUTCOME (same day to +2 days) ----
+plans_outcome <- plans_long %>%
+  left_join(visits_long, by = "id") %>%
+  mutate(
+    visit_within_3days = visit_date >= plan_date &
+                         visit_date <= plan_date + days(2)
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    outcome = any(visit_within_3days, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT (exposure) ----
+plans_outcome <- plans_outcome %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit_new %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(
+        cols = all_of(msg_cols),
+        names_to = "msg_col",
+        values_to = "msg_received"
+      ),
+    by = c("id", "msg_col")
+  )
+
+# ---- 2×2 CONTINGENCY TABLE ----
+contingency <- plans_outcome %>%
+  mutate(
+    msg_received = ifelse(is.na(msg_received), FALSE, msg_received),
+    outcome = ifelse(outcome, TRUE, FALSE)
+  ) %>%
+  group_by(msg_received, outcome) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(msg_received = c(FALSE, TRUE),
+                  outcome = c(FALSE, TRUE),
+                  fill = list(n = 0))
+
+print(contingency)
+
+# ---- FORMATTED VIEW + CHI-SQUARE TEST ----
+contingency_table <- contingency %>%
+  pivot_wider(names_from = outcome,
+              values_from = n,
+              names_prefix = "Outcome_") %>%
+  rename(
+    `Message Received` = msg_received,
+    `No Visit (0)` = Outcome_FALSE,
+    `Visit Within 3 Days (1)` = Outcome_TRUE
+  )
+
+print(contingency_table)
+
+# --- Chi-square test ---
+matrix_test <- as.matrix(contingency_table[, c("No Visit (0)", "Visit Within 3 Days (1)")])
+rownames(matrix_test) <- ifelse(contingency_table$`Message Received`, "Received", "Not Received")
+
+cat("\nChi-square test of independence:\n")
+print(chisq.test(matrix_test))
+
+
+```
+
+### 2 x 2 contingeny table (7 days)
+
+```{r}
+# ---- PARAMETERS ----
+outcome_days_7d <- 0:6        # same day + next 6 days
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+
+# ---- DEFINE VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)
+visit_cols <- paste0("visit_date_", 1:6)
+msg_cols <- paste0("msg_received_", 1:6)
+
+# ---- CONVERT ALL DATES TO DATE CLASS ----
+cohort_visit_new <- cohort_visit_new %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT FOR VISITS ----
+visits_long_7d <- cohort_visit_new %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT FOR PLANNED ENCOUNTERS ----
+plans_long_7d <- cohort_visit_new %>%
+  select(id, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG OUTCOME (same day to +6 days) ----
+plans_outcome_7d <- plans_long_7d %>%
+  left_join(visits_long_7d, by = "id") %>%
+  mutate(
+    visit_within_7days = visit_date >= plan_date &
+                         visit_date <= plan_date + days(6)
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    outcome_7d = any(visit_within_7days, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT (exposure) ----
+plans_outcome_7d <- plans_outcome_7d %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit_new %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(
+        cols = all_of(msg_cols),
+        names_to = "msg_col",
+        values_to = "msg_received_7d"
+      ),
+    by = c("id", "msg_col")
+  )
+
+# ---- 2×2 CONTINGENCY TABLE (7-day window) ----
+contingency_7d <- plans_outcome_7d %>%
+  mutate(
+    msg_received_7d = ifelse(is.na(msg_received_7d), FALSE, msg_received_7d),
+    outcome_7d = ifelse(outcome_7d, TRUE, FALSE)
+  ) %>%
+  group_by(msg_received_7d, outcome_7d) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(
+    msg_received_7d = c(FALSE, TRUE),
+    outcome_7d = c(FALSE, TRUE),
+    fill = list(n = 0)
+  )
+
+cat("\n📋 2×2 contingency table (raw counts, 0–6 days window):\n")
+print(contingency_7d)
+
+# ---- Formatted table + Chi-square ----
+contingency_7d_table <- contingency_7d %>%
+  pivot_wider(
+    names_from = outcome_7d,
+    values_from = n,
+    names_prefix = "Outcome_"
+  ) %>%
+  rename(
+    `Message Received` = msg_received_7d,
+    `No Visit (0)` = Outcome_FALSE,
+    `Visit Within 7 Days (1)` = Outcome_TRUE
+  )
+
+print(contingency_7d_table)
+
+chi_matrix_7d <- as.matrix(contingency_7d_table[, c("No Visit (0)", "Visit Within 7 Days (1)")])
+rownames(chi_matrix_7d) <- ifelse(contingency_7d_table$`Message Received`, "Received", "Not Received")
+
+cat("\nChi-square test (7-day window = same day to +6 days):\n")
+chi_result_7d <- chisq.test(chi_matrix_7d, correct = FALSE)
+print(chi_result_7d)
+
+```
+
+### Only planned encounter date (actual visit)
+
+```{r}
+# ---- PARAMETERS ----
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+
+# ---- DEFINE VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)     # planned encounters
+visit_cols <- paste0("visit_date_", 1:6)  # recorded visits
+msg_cols <- paste0("msg_received_", 1:6)  # message receipt flags
+
+# ---- CONVERT ALL DATES TO DATE CLASS ----
+cohort_visit_new <- cohort_visit_new %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT FOR VISITS ----
+visits_long_same <- cohort_visit_new %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT FOR PLANNED ENCOUNTERS ----
+plans_long_same <- cohort_visit_new %>%
+  select(id, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG SAME-DAY OUTCOME ----
+plans_outcome_same <- plans_long_same %>%
+  left_join(visits_long_same, by = "id") %>%
+  mutate(
+    visit_same_day = visit_date == plan_date
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    outcome_same = any(visit_same_day, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT (exposure) ----
+plans_outcome_same <- plans_outcome_same %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit_new %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(
+        cols = all_of(msg_cols),
+        names_to = "msg_col",
+        values_to = "msg_received_same"
+      ),
+    by = c("id", "msg_col")
+  )
+
+# ---- Summary: number of planned encounters per woman ----
+plan_count_summary_same <- plans_outcome_same %>%
+  group_by(id) %>%
+  summarise(n_plan_encounters_same = n(), .groups = "drop") %>%
+  arrange(desc(n_plan_encounters_same))
+
+cat("✅ Summary of planned encounters per woman (same-day window):\n")
+print(plan_count_summary_same)
+
+# ---- Descriptive statistics ----
+summary_stats_same <- plan_count_summary_same %>%
+  summarise(
+    total_women = n(),
+    total_encounters_same = sum(n_plan_encounters_same),
+    mean_per_woman = mean(n_plan_encounters_same),
+    median_per_woman = median(n_plan_encounters_same),
+    sd_per_woman = sd(n_plan_encounters_same),
+    min_per_woman = min(n_plan_encounters_same),
+    max_per_woman = max(n_plan_encounters_same)
+  )
+
+cat("\n📊 Descriptive statistics:\n")
+print(summary_stats_same)
+
+# ---- Frequency table ----
+freq_table_same <- plan_count_summary_same %>%
+  count(n_plan_encounters_same, name = "n_women") %>%
+  mutate(percent = round(n_women / sum(n_women) * 100, 1))
+
+cat("\n📈 Frequency table (planned encounters per woman during intervention):\n")
+print(freq_table_same)
+
+# ---- 2x2 CONTINGENCY TABLE (same-day outcome) ----
+contingency_same <- plans_outcome_same %>%
+  mutate(
+    msg_received_same = ifelse(is.na(msg_received_same), FALSE, msg_received_same),
+    outcome_same = ifelse(outcome_same, TRUE, FALSE)
+  ) %>%
+  group_by(msg_received_same, outcome_same) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(
+    msg_received_same = c(FALSE, TRUE),
+    outcome_same = c(FALSE, TRUE),
+    fill = list(n = 0)
+  )
+
+cat("\n📋 2×2 contingency table (raw counts):\n")
+print(contingency_same)
+
+# ---- Formatted 2x2 table ----
+contingency_same_table <- contingency_same %>%
+  pivot_wider(
+    names_from = outcome_same,
+    values_from = n,
+    names_prefix = "Outcome_"
+  ) %>%
+  rename(
+    `Message Received` = msg_received_same,
+    `No Visit (0)` = Outcome_FALSE,
+    `Visit Same Day (1)` = Outcome_TRUE
+  )
+
+cat("\n📋 Formatted 2×2 table (same-day window):\n")
+print(contingency_same_table)
+
+# ---- Chi-square test ----
+chi_matrix_same <- as.matrix(contingency_same_table[, c("No Visit (0)", "Visit Same Day (1)")])
+rownames(chi_matrix_same) <- ifelse(contingency_same_table$`Message Received`, "Received", "Not Received")
+
+cat("\nChi-square test (same-day outcome):\n")
+chi_result_same <- chisq.test(chi_matrix_same, correct = FALSE)
+print(chi_result_same)
+```
+
+### Nested 5 x 2 table and post-hoc analyses
+
+```{r}
+# ---- PARAMETERS ----
+start_eval <- as.Date("2025-09-19")
+end_eval   <- as.Date("2025-10-19")
+
+# ---- VARIABLE GROUPS ----
+plan_cols <- paste0("plan_enc_", 1:3)
+visit_cols <- paste0("visit_date_", 1:6)
+msg_cols <- paste0("msg_received_", 1:6)
+
+# ---- CONVERT TO DATE ----
+cohort_visit_new <- cohort_visit_new %>%
+  mutate(across(c(all_of(plan_cols), all_of(visit_cols)), as.Date))
+
+# ---- LONG FORMAT FOR VISITS ----
+visits_long <- cohort_visit_new %>%
+  select(id, all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_no",
+    values_to = "visit_date"
+  ) %>%
+  filter(!is.na(visit_date))
+
+# ---- LONG FORMAT FOR PLANNED ENCOUNTERS ----
+plans_long <- cohort_visit_new %>%
+  select(id, cluster, all_of(plan_cols), all_of(msg_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= start_eval & plan_date <= end_eval) %>%
+  arrange(id, plan_date)
+
+# ---- JOIN AND FLAG OUTCOME (H₀ to H+2 window) ----
+plans_outcome <- plans_long %>%
+  left_join(visits_long, by = "id") %>%
+  mutate(
+    visit_within_2days = visit_date >= plan_date &               # ✅ include same day (H₀)
+                         visit_date <= plan_date + days(2)        # ✅ up to 2 days after
+  ) %>%
+  group_by(id, cluster, plan_no, plan_date) %>%
+  summarise(
+    outcome = any(visit_within_2days, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- MATCH MESSAGE RECEIPT ----
+plans_outcome <- plans_outcome %>%
+  mutate(
+    msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))
+  ) %>%
+  left_join(
+    cohort_visit_new %>%
+      select(id, all_of(msg_cols)) %>%
+      pivot_longer(
+        cols = all_of(msg_cols),
+        names_to = "msg_col",
+        values_to = "msg_received"
+      ),
+    by = c("id", "msg_col")
+  )
+
+# ---- FILTER: only participants who RECEIVED the message ----
+plans_outcome_received <- plans_outcome %>%
+  filter(msg_received == TRUE)
+
+# ---- Cluster-level cross-tab summary ----
+cross_table_cluster <- plans_outcome_received %>%
+  group_by(cluster, outcome) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(cluster, outcome = c(FALSE, TRUE), fill = list(n = 0)) %>%
+  group_by(cluster) %>%
+  mutate(
+    total = sum(n),
+    percent = round((n / total) * 100, 1)
+  ) %>%
+  ungroup()
+
+# ---- Pivot wider for summary ----
+cross_table_cluster_wide <- cross_table_cluster %>%
+  pivot_wider(
+    names_from = outcome,
+    values_from = c(n, percent),
+    names_glue = "{.value}_outcome_{outcome}"
+  ) %>%
+  rename(
+    `No Visit (0)` = n_outcome_FALSE,
+    `Visit Within 2 Days (1)` = n_outcome_TRUE,
+    `% No Visit (0)` = percent_outcome_FALSE,
+    `% Visit Within 2 Days (1)` = percent_outcome_TRUE
+  )
+
+cat("✅ Cluster-level table (Message Received = TRUE only, H₀–H+2 window):\n")
+print(cross_table_cluster_wide)
+
+# ---- Build contingency table (Cluster × Outcome) ----
+chi_cluster_matrix <- plans_outcome_received %>%
+  count(cluster, outcome) %>%
+  pivot_wider(
+    names_from = outcome,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  column_to_rownames("cluster") %>%
+  as.matrix()
+
+cat("\n📊 Contingency table (Cluster × Outcome):\n")
+print(chi_cluster_matrix)
+
+# ---- Chi-square test of independence ----
+chi_cluster_result <- chisq.test(chi_cluster_matrix, correct = FALSE)
+cat("\n🔹 Chi-square Test Result:\n")
+print(chi_cluster_result)
+
+# ---- Expected counts for diagnostic ----
+cat("\n🔹 Expected Counts:\n")
+print(round(chi_cluster_result$expected, 1))
+
+# ---- POST-HOC: Multiple comparisons (pairwise cluster differences) ----
+# Use rcompanion::pairwiseNominalIndependence with Holm correction
+cat("\n🔹 Post-hoc Multiple Comparisons (Holm correction):\n")
+posthoc_result <- pairwiseNominalIndependence(
+  chi_cluster_matrix,
+  fisher = FALSE,
+  gtest = FALSE,
+  chisq = TRUE,
+  method = "holm"
+)
+print(posthoc_result)
+
+posthoc_result <- rcompanion::pairwiseNominalIndependence(
+  chi_cluster_matrix,
+  fisher = TRUE,    # use Fisher's Exact Test instead of chi-square
+  gtest = FALSE,
+  chisq = FALSE,
+  method = "holm"
+)
+```
+
+### GT Tidy Table Visualization for All tables
+
+```{r}
+# =========================
+# 2️⃣ 3-DAY RESULTS
+# =========================
+contingency_3d_fmt <- contingency_table %>%
+  group_by(`Message Received`) %>%
+  mutate(
+    row_total = `No Visit (0)` + `Visit Within 3 Days (1)`,
+    pct_no = round(`No Visit (0)` / row_total * 100, 1),
+    pct_yes = round(`Visit Within 3 Days (1)` / row_total * 100, 1),
+    `No Visit (0)` = glue("{`No Visit (0)`} ({pct_no}%)"),
+    `Visit Within 2 Days (1)` = glue("{`Visit Within 3 Days (1)`} ({pct_yes}%)")  # ✅ renamed column here
+  ) %>%
+  ungroup() %>%
+  mutate(`Message Received` = ifelse(`Message Received`, "TRUE (Message Received)", "FALSE (No Message)")) %>%
+  select(`Message Received`, `No Visit (0)`, `Visit Within 2 Days (1)`)  # ✅ select new name
+
+chi_matrix_3d <- as.matrix(contingency_table[, c("No Visit (0)", "Visit Within 3 Days (1)")])
+rownames(chi_matrix_3d) <- ifelse(contingency_table$`Message Received`, "Received", "Not Received")
+chi_result_3d <- chisq.test(chi_matrix_3d, correct = FALSE)
+
+gt_3d <- contingency_3d_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visits Within 2 Days After Planned Encounter Date**"),  # ✅ updated title too
+    subtitle = "Intervention period: 19 Sep – 19 Oct 2025"
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test: X² = {round(chi_result_3d$statistic, 3)}, ",
+      "df = {chi_result_3d$parameter}, ",
+      "p = {round(chi_result_3d$p.value, 4)}"
+    )
+  )
+
+
+# =========================
+# 3️⃣ 7-DAY RESULTS
+# =========================
+contingency_7d_fmt <- contingency_7d_table %>%
+  group_by(`Message Received`) %>%
+  mutate(
+    row_total = `No Visit (0)` + `Visit Within 7 Days (1)`,
+    pct_no = round(`No Visit (0)` / row_total * 100, 1),
+    pct_yes = round(`Visit Within 7 Days (1)` / row_total * 100, 1),
+    `No Visit (0)` = glue("{`No Visit (0)`} ({pct_no}%)"),
+    `Visit Within 6 Days (1)` = glue("{`Visit Within 7 Days (1)`} ({pct_yes}%)")  # ✅ renamed column
+  ) %>%
+  ungroup() %>%
+  mutate(`Message Received` = ifelse(`Message Received`, "TRUE (Message Received)", "FALSE (No Message)")) %>%
+  select(`Message Received`, `No Visit (0)`, `Visit Within 6 Days (1)`)  # ✅ updated selection
+
+chi_matrix_7d <- as.matrix(contingency_7d_table[, c("No Visit (0)", "Visit Within 7 Days (1)")])
+rownames(chi_matrix_7d) <- ifelse(contingency_7d_table$`Message Received`, "Received", "Not Received")
+chi_result_7d <- chisq.test(chi_matrix_7d, correct = FALSE)
+
+gt_7d <- contingency_7d_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visits Within 6 Days After Planned Encounter Date**"),  # ✅ corrected title
+    subtitle = "Intervention period: 19 Sep – 19 Oct 2025"
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test: X² = {round(chi_result_7d$statistic, 3)}, ",
+      "df = {chi_result_7d$parameter}, ",
+      "p = {round(chi_result_7d$p.value, 4)}"
+    )
+  )
+
+
+# =========================
+# 3️⃣  CLUSTER-LEVEL RESULTS (2-day window)
+# =========================
+
+# ---- Build formatted cluster table ----
+cross_table_cluster_fmt <- chi_cluster_matrix %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Cluster") %>%
+  rename(
+    `No Visit (0)` = `FALSE`,
+    `Visit Within 2 Days (1)` = `TRUE`   # ✅ updated from 3 to 2 days
+  ) %>%
+  mutate(
+    `Row Total` = `No Visit (0)` + `Visit Within 2 Days (1)`,
+    `No Visit (0)` = glue("{`No Visit (0)`} ({round(`No Visit (0)` / `Row Total` * 100, 1)}%)"),
+    `Visit Within 2 Days (1)` = glue("{`Visit Within 2 Days (1)`} ({round(`Visit Within 2 Days (1)` / `Row Total` * 100, 1)}%)")
+  ) %>%
+  select(Cluster, `No Visit (0)`, `Visit Within 2 Days (1)`)
+
+# ---- Chi-square test ----
+chi_cluster_result <- chisq.test(chi_cluster_matrix, correct = FALSE)
+
+cross_table_cluster_gt <- cross_table_cluster_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visit Outcomes by Intervention Cluster (Received Only)**"),
+    subtitle = "Among women who received the message; outcome = visit within 2 days since planned encounter date"  # ✅ consistent wording
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test across clusters: X² = {round(chi_cluster_result$statistic, 3)}, ",
+      "df = {chi_cluster_result$parameter}, ",
+      "p = {round(chi_cluster_result$p.value, 4)}"
+    )
+  )
+
+
+# ---- Format and label post-hoc comparison results ----
+posthoc_gt <- posthoc_result %>%
+  mutate(
+    Comparison = gsub(":", " vs ", Comparison),  # make comparisons more readable
+    p.Fisher = round(p.Fisher, 3),
+    p.adj.Fisher = round(p.adj.Fisher, 3)
+  ) %>%
+  rename(
+    `Cluster Comparison` = Comparison,
+    `p (Fisher)` = p.Fisher,
+    `p (Adjusted, Holm)` = p.adj.Fisher
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Post-hoc Pairwise Cluster Comparisons (Fisher’s Exact Test)**"),
+    subtitle = "Pairwise Fisher’s Exact Tests with Holm correction for multiple comparisons"
+  ) %>%
+  fmt_number(
+    columns = c(`p (Fisher)`, `p (Adjusted, Holm)`),
+    decimals = 3
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_options(
+    table.font.size = 13,
+    heading.align = "center",
+    column_labels.font.weight = "bold"
+  ) %>%
+  tab_source_note(
+    source_note = "p-values adjusted for multiple testing using Holm method"
+  )
+
+# =========================
+# 1️⃣ SAME-DAY RESULTS
+# =========================
+contingency_same_fmt <- contingency_same_table %>%
+  group_by(`Message Received`) %>%
+  mutate(
+    row_total = `No Visit (0)` + `Visit Same Day (1)`,
+    pct_no = round(`No Visit (0)` / row_total * 100, 1),
+    pct_yes = round(`Visit Same Day (1)` / row_total * 100, 1),
+    `No Visit (0)` = glue("{`No Visit (0)`} ({pct_no}%)"),
+    `Visit Same Day (1)` = glue("{`Visit Same Day (1)`} ({pct_yes}%)")
+  ) %>%
+  ungroup() %>%
+  mutate(`Message Received` = ifelse(`Message Received`, "TRUE (Message Received)", "FALSE (No Message)")) %>%
+  select(`Message Received`, `No Visit (0)`, `Visit Same Day (1)`)
+
+chi_matrix_same <- as.matrix(contingency_same_table[, c("No Visit (0)", "Visit Same Day (1)")])
+rownames(chi_matrix_same) <- ifelse(contingency_same_table$`Message Received`, "Received", "Not Received")
+chi_result_same <- chisq.test(chi_matrix_same, correct = FALSE)
+
+gt_same <- contingency_same_fmt %>%
+  gt() %>%
+  tab_header(
+    title = md("**ANC Visits Exactly On the Planned Encounter Date**"),
+    subtitle = "Intervention period: 19 Sep – 19 Oct 2025"
+  ) %>%
+  cols_align(align = "center") %>%
+  tab_source_note(
+    source_note = glue(
+      "Pearson's Chi-squared test: X² = {round(chi_result_same$statistic, 3)}, ",
+      "df = {chi_result_same$parameter}, ",
+      "p = {round(chi_result_same$p.value, 4)}"
+    )
+  )
+
+# =========================
+# ✅  DISPLAY ALL GT TABLES
+# =========================
+gt_3d
+gt_7d
+cross_table_cluster_gt
+gt_same
+posthoc_gt
+
+# ---- Export all gt tables to current working directory ----
+gtsave(
+  data = gt_3d,
+  filename = "ANC_3day_table.png",
+  vwidth = 1000,
+  vheight = 500,
+  zoom = 2
+)
+
+gtsave(
+  data = gt_7d,
+  filename = "ANC_7day_table.png",
+  vwidth = 1000,
+  vheight = 500,
+  zoom = 2
+)
+
+gtsave(
+  data = cross_table_cluster_gt,
+  filename = "ANC_cluster_table.png",
+  vwidth = 1200,
+  vheight = 600,
+  zoom = 2
+)
+
+gtsave(
+  data = gt_same,
+  filename = "ANC_sameday_table.png",
+  vwidth = 1000,
+  vheight = 500,
+  zoom = 2
+)
+
+gtsave(
+  data = posthoc_gt,
+  filename = "ANC_posthoc_cluster_table.png",
+  vwidth = 900,
+  vheight = 600,
+  zoom = 2
+)
+
+cat("\n✅ All gt tables exported successfully to your working directory:\n",
+    getwd(), "\n")
+```
+
+### Deduplicated Cohort Interval Histogram
+
+```{r}
+# --- Define identifiers and column sets ---
+id_col <- "phone"
+planned_cols <- c("plan_enc_1", "plan_enc_2", "plan_enc_3")
+visit_cols   <- paste0("visit_date_", 1:6)
+
+# --- Reshape planned and visit dates to long ---
+plans_long <- cohort_visit_new %>%
+  select(all_of(c(id_col, planned_cols))) %>%
+  pivot_longer(
+    cols = all_of(planned_cols),
+    names_to = "plan_encounter",
+    values_to = "planned_date"
+  ) %>%
+  mutate(planned_date = ymd(planned_date))
+
+visits_long <- cohort_visit_new %>%
+  select(all_of(c(id_col, visit_cols))) %>%
+  pivot_longer(
+    cols = all_of(visit_cols),
+    names_to = "visit_instance",
+    values_to = "visit_date"
+  ) %>%
+  mutate(visit_date = ymd(visit_date))
+
+# --- Define intervention period ---
+intervention_start <- ymd("2025-09-19")
+intervention_end   <- ymd("2025-10-19")
+
+# --- Join all plan-visit pairs (within intervention period) ---
+plan_visit_pairs <- plans_long %>%
+  inner_join(visits_long, by = id_col) %>%
+  filter(!is.na(planned_date), !is.na(visit_date)) %>%
+  filter(visit_date >= intervention_start & visit_date <= intervention_end) %>%
+  mutate(
+    time_diff_days = as.numeric(difftime(visit_date, planned_date, units = "days")),
+    abs_diff = abs(time_diff_days)
+  )
+
+# --- Keep the NEAREST planned encounter for each visit (before OR after) ---
+plan_visit_nearest <- plan_visit_pairs %>%
+  group_by(across(all_of(c(id_col, "visit_date", "visit_instance")))) %>%
+  slice_min(abs_diff, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# --- Compute summary stats ---
+n_total <- nrow(plan_visit_nearest)
+summary_stats <- plan_visit_nearest %>%
+  summarise(
+    mean_delay = mean(time_diff_days, na.rm = TRUE),
+    median_delay = median(time_diff_days, na.rm = TRUE),
+    sd_delay = sd(time_diff_days, na.rm = TRUE),
+    p10_delay = quantile(time_diff_days, 0.1, na.rm = TRUE),
+    p90_delay = quantile(time_diff_days, 0.9, na.rm = TRUE)
+  )
+
+# --- Prepare histogram data with bin counts ---
+hist_data <- plan_visit_nearest %>%
+  mutate(
+    bin = cut(
+      time_diff_days,
+      breaks = seq(floor(min(time_diff_days, na.rm = TRUE)) - 0.5,
+                   ceiling(max(time_diff_days, na.rm = TRUE)) + 0.5, by = 1)
+    )
+  ) %>%
+  count(bin) %>%
+  mutate(mid = as.numeric(sub("\\((.+),.*", "\\1", bin)) + 0.5)
+
+# --- Plot histogram ---
+ggplot(plan_visit_nearest, aes(x = time_diff_days)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  geom_text(
+    data = hist_data,
+    aes(x = mid, y = n, label = n),
+    vjust = -0.3, size = 3.2, color = "black"
+  ) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "Time Difference Between Nearest Planned Encounter and Actual Visit",
+    subtitle = paste0(
+      "Using deduplicated dataset (cohort_visit_new); ",
+      "n = ", n_total,
+      " visits during 19 Sep–19 Oct 2025\n",
+      "Mean = ", round(summary_stats$mean_delay, 1), "d, ",
+      "Median = ", round(summary_stats$median_delay, 1), "d"
+    ),
+    x = "Time difference (days; negative = before plan, positive = after plan)",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+### Visualization - Histogram
+
+```{r}
+# parameters
+id_col <- "phone"
+planned_cols <- paste0("plan_enc_", 1:3)
+visit_cols   <- paste0("visit_date_", 1:6)
+intervention_start <- ymd("2025-09-19")
+intervention_end   <- ymd("2025-10-19")
+days_window <- 0:2   # 0..2 days after plan
+
+# ensure dates
+cohort_visit_new <- cohort_visit_new %>%
+  mutate(across(all_of(c(planned_cols, visit_cols)), ~ as.Date(.)))
+
+# pivot plans (plan-centred) and restrict to intervention period
+plans_long <- cohort_visit_new %>%
+  select(all_of(c(id_col, planned_cols))) %>%
+  pivot_longer(cols = all_of(planned_cols),
+               names_to = "plan_no", values_to = "plan_date") %>%
+  filter(!is.na(plan_date)) %>%
+  filter(plan_date >= intervention_start & plan_date <= intervention_end)
+
+# pivot visits
+visits_long <- cohort_visit_new %>%
+  select(all_of(c(id_col, visit_cols))) %>%
+  pivot_longer(cols = all_of(visit_cols),
+               names_to = "visit_instance", values_to = "visit_date") %>%
+  filter(!is.na(visit_date))
+
+# for each plan, find the first subsequent visit (visit_date >= plan_date)
+plan_first_subseq_visit <- plans_long %>%
+  left_join(visits_long, by = id_col) %>%
+  # only consider visits on/after the plan
+  filter(!is.na(visit_date) & visit_date >= plan_date) %>%
+  # compute delay
+  mutate(delay_days = as.integer(difftime(visit_date, plan_date, units = "days"))) %>%
+  # keep only visits within some generous window (e.g. up to 90 days) if you want; optional:
+  # filter(delay_days <= 90) %>%
+  group_by(across(all_of(c(id_col, "plan_no", "plan_date")))) %>%
+  # pick the earliest subsequent visit (minimum delay)
+  slice_min(delay_days, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# plans with no subsequent visit will not appear in plan_first_subseq_visit
+# create a full plans table with match info (NA if no visit)
+plans_with_match <- plans_long %>%
+  left_join(
+    plan_first_subseq_visit %>%
+      select(all_of(c(id_col, "plan_no", "plan_date", "visit_date", "delay_days"))),
+    by = c(id_col, "plan_no", "plan_date")
+  )
+
+# flag outcome: visit within 0..2 days after plan (same as your cross-tab)
+plans_with_match <- plans_with_match %>%
+  mutate(
+    outcome_0_2 = ifelse(!is.na(delay_days) & delay_days %in% days_window, TRUE, FALSE)
+  )
+
+# diagnostic counts (these should match your cross-tab)
+contingency_plan <- plans_with_match %>%
+  # if you have msg_received variables, attach them before summarising
+  left_join(
+    cohort_visit_new %>%
+      select(all_of(c(id_col, paste0("msg_received_", 1:3)))) %>%
+      pivot_longer(cols = starts_with("msg_received_"), names_to = "msg_col", values_to = "msg_val"),
+    by = id_col
+  ) %>%
+  # map plan_no to corresponding msg_received_X (if your naming aligns: plan_enc_1 -> msg_received_1)
+  mutate(expected_msg_col = paste0("msg_received_", as.numeric(gsub("plan_enc_", "", plan_no)))) %>%
+  # only keep rows where msg_col equals expected_msg_col to get the matching msg flag for this plan
+  filter(msg_col == expected_msg_col) %>%
+  rename(msg_received = msg_val) %>%
+  group_by(msg_received, outcome_0_2) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::complete(msg_received = c(FALSE, TRUE), outcome_0_2 = c(FALSE, TRUE), fill = list(n = 0))
+
+print(contingency_plan)
+
+# confirm the raw total matched
+cat("Total planned encounters in period:", nrow(plans_long), "\n")
+cat("Plans with a subsequent visit (any delay):", sum(!is.na(plans_with_match$delay_days)), "\n")
+cat("Plans with outcome 0..2 days:", sum(plans_with_match$outcome_0_2), "\n")
+
+# --- Pre-compute histogram bins 0–60 days ---
+hist_data <- plans_with_match %>%
+  filter(!is.na(delay_days)) %>%
+  mutate(bin = floor(delay_days)) %>%
+  count(bin) %>%
+  complete(bin = 0:60, fill = list(n = 0)) %>%
+  mutate(bin = as.numeric(bin))
+
+# --- Plot with slightly extended x-axis (so bin 0 shows) ---
+ggplot(hist_data, aes(x = bin, y = n)) +
+  geom_col(fill = "steelblue", color = "white", width = 1) +
+  geom_text(
+    aes(label = ifelse(n > 0, n, "")),
+    vjust = -0.4,
+    size = 3.2,
+    color = "black"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  scale_x_continuous(
+    limits = c(-0.5, 60),        # 👈 widened to include leftmost bar
+    breaks = seq(0, 60, by = 5)
+  ) +
+  labs(
+    title = "Delays Between Planned Encounter and First Subsequent Visit",
+    subtitle = paste0(
+      "Intervention period: 19 Sep – 19 Oct 2025\n",
+      "Planned encounters: ", nrow(plans_long),
+      " | With subsequent visit: ", sum(!is.na(plans_with_match$delay_days)),
+      " | Visit ≤ 2 days after plan: ", sum(plans_with_match$outcome_0_2)
+    ),
+    x = "Delay after planned encounter (days)",
+    y = "Number of planned encounters"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(size = 11, margin = margin(b = 10)),
+    axis.title = element_text(size = 12),
+    panel.grid.minor = element_blank()
+  ) + coord_cartesian(clip = "off", xlim = c(-0.5, 60), ylim = c(0, 25))
+
+
+```
+
+```{r}
+
+# ---- FILTER: rows with at least one encounter within 2 days of planned date ----
+cohort_within2days <- cohort_visit_new %>%
+  # Convert visit columns to long format (if not already done)
+  select(id, all_of(plan_cols), all_of(visit_cols)) %>%
+  pivot_longer(
+    cols = all_of(plan_cols),
+    names_to = "plan_no",
+    values_to = "plan_date"
+  ) %>%
+  filter(!is.na(plan_date)) %>%
+  left_join(
+    visits_long,  # from your earlier code
+    by = "id"
+  ) %>%
+  mutate(
+    visit_within_2days = visit_date >= plan_date &
+                         visit_date <= plan_date + days(2)
+  ) %>%
+  group_by(id, plan_no, plan_date) %>%
+  summarise(
+    within_2days = any(visit_within_2days, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(within_2days) %>%
+  left_join(cohort_visit_new, by = "id")
+
+# ---- VIEW RESULTS ----
+nrow(cohort_within2days)  # Number of participants with visits within 2 days
+View(cohort_within2days)
+```
