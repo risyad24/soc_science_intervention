@@ -1,0 +1,873 @@
+---
+title: "Campaign Quality Asessment"
+author: "Nisa Sri Wahyuni"
+date: "2025-11-17"
+output: html_document
+---
+
+# List of required packages
+```{r} 
+packages <- c(
+  "tidyverse", "janitor", "DT", "ggpubr", "psych", 
+  "irr", "broom", "ggcorrplot", "readxl", "networkD3", 
+  "htmlwidgets", "ggalluvial", "lubridate", "gt", 
+  "skimr", "zoo", "here", "bigrquery", "glue"
+)
+
+# Install missing packages
+installed <- rownames(installed.packages())
+to_install <- setdiff(packages, installed)
+if (length(to_install) > 0) {
+  install.packages(to_install, dependencies = TRUE)
+}
+
+# Load packages quietly without printing lapply output
+suppressPackageStartupMessages({
+  invisible(lapply(packages, library, character.only = TRUE))
+})
+
+# Set knitr defaults
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 5
+)
+```
+1ST OBJECTIVE: CAMPAIGN QUALITY
+
+#1ST OBJECTIVE: CAMPAIGN QUALITY
+#STEP 1. Intervention Population Preparation
+##1.1. Data Group
+```{r}
+getwd()
+setwd("/Users/nisawahyuni/Documents/OUCRU/7th Deliverable - Data Analysis/ANC Analysis by Nisa") #Adjusted based on directory
+#Read the CSV file of Purbalingga
+Purbalingga_group <- read.csv("Purbalingga Group.csv")
+#Read the CSV file of Lombok Barat
+Lombar_group <- read.csv("Lombok Barat Group.csv")
+```
+Intervention in Purbalingga Pregnant Women
+##1.2 Intervention in Purbalingga Pregnant Women
+```{r}
+library(dplyr)
+
+Purbalingga_intervention <- Purbalingga_group %>%
+  filter(cluster_group == "intervention")
+
+dim(Purbalingga_intervention)    # number of rows and columns
+table(Purbalingga_intervention$cluster_group)
+head(Purbalingga_intervention)
+nrow(Purbalingga_intervention)
+table(Purbalingga_intervention$cluster_group)
+
+#record as CSV
+write.csv(Purbalingga_intervention, "Purbalingga_Intervention_Only.csv", row.names = FALSE)
+
+```
+Intervention in Lombok Barat Pregnant Women
+##1.3 Intervention in Lombok Barat Pregnant Women
+```{r}
+Lombar_intervention <- Lombar_group %>%
+  filter(str_to_lower(cluster_group) == "intervention")
+
+nrow(Lombar_intervention)
+table(Lombar_intervention$cluster_group)
+
+#record as CSV
+write.csv(Lombar_intervention, "lombar_Intervention_Only.csv", row.names = FALSE)
+```
+
+##1.4 All Intervention Group Unified (Standarized and Deduplicate)
+```{r}
+library(dplyr)
+
+# Add district column to each before merging
+Purbalingga_intervention <- Purbalingga_intervention %>%
+  mutate(District = "Purbalingga")
+
+Lombar_intervention <- Lombar_intervention %>%
+  mutate(District = "Lombok Barat")
+
+identical(names(Purbalingga_intervention), names(Lombar_intervention))
+names(Purbalingga_intervention)
+names(Lombar_intervention)
+
+###STANDARIDZE BEFORE COMBINE###
+library(dplyr)
+
+# Standardize column names
+Purbalingga_intervention <- Purbalingga_intervention %>%
+  rename(
+    name = nama,
+    phone = phone_number,
+    hpht = hpht_combi
+  )
+
+# Add missing column (clean_id) so both have same structure
+if (!"clean_id" %in% names(Purbalingga_intervention)) {
+  Purbalingga_intervention$clean_id <- NA
+}
+
+# Ensure both have identical columns
+common_cols <- union(names(Purbalingga_intervention), names(Lombar_intervention))
+
+Purbalingga_intervention <- Purbalingga_intervention %>%
+  select(all_of(common_cols))
+
+Lombar_intervention <- Lombar_intervention %>%
+  select(all_of(common_cols))
+
+#Phone Number
+Purbalingga_intervention <- Purbalingga_intervention %>%
+  mutate(phone = as.character(phone))
+
+Lombar_intervention <- Lombar_intervention %>%
+  mutate(phone = as.character(phone))
+
+# Merge both into unified dataset
+All_intervention <- bind_rows(Purbalingga_intervention, Lombar_intervention)
+
+All_intervention <- All_intervention %>%
+  rename(phone_number = phone)
+
+# Total unique participants in intervention list/Deduplicate
+total_intervention <- n_distinct(All_intervention$phone_number)
+
+#Create Final Dataset
+Final_intervention_pop <- All_intervention %>%
+  distinct(phone_number, .keep_all = TRUE)
+
+
+nrow(Final_intervention_pop)
+#566 all intervention pregnant women with unique phone number
+
+write.csv(Final_intervention_pop, "Final_intervention_population.csv", row.names = FALSE)
+
+```
+STEP 2. Posyandu Schedule Dataset
+#STEP 2. Posyandu Schedule Dataset
+##5A. Call dataset posyandu
+```{r}
+library(readxl)
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+getwd()
+setwd("/Users/nisawahyuni/Documents/OUCRU/7th Deliverable - Data Analysis/ANC Analysis by Nisa")
+sched_lobar <- read_excel("schedule_lb.xlsx")
+sched_pbg   <- read_excel("schedule_pb.xlsx")
+
+names(sched_lobar)
+names(sched_pbg)
+
+```
+
+##5B. Clean and combine lombar and purbalingga
+```{r}
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+#Standardisasi jadwal posyandu (Lobar + Purbalingga)
+clean_schedule <- function(df, year = 2025) {
+  df %>%
+    # Standardize posyandu names
+    mutate(
+      posyandu = str_to_lower(posyandu),
+      posyandu = str_squish(posyandu),
+      posyandu = str_replace_all(posyandu, "[^a-zA-Z0-9 ]", "")
+    ) %>%
+    
+    # Convert november + desember to numeric
+    mutate(
+      november  = as.numeric(november),
+      desember  = as.numeric(desember),
+      
+      # Convert to REAL DATES
+      posyandu_nov  = make_date(year = year, month = 11, day = november),
+      posyandu_dec  = make_date(year = year, month = 12, day = desember)
+    )
+}
+
+#Apply Cleaning
+sched_lobar  <- clean_schedule(sched_lobar)
+sched_pbg    <- clean_schedule(sched_pbg)
+
+
+#Combine
+schedule_all <- bind_rows(
+  sched_lobar  %>% mutate(district = "Lombok Barat"),
+  sched_pbg    %>% mutate(district = "Purbalingga")
+)
+```
+
+#5C. Posyandu Schedule Matching with Population Dataset
+5C. Posyandu Schedule Matching with Population Dataset
+Summary: Before matching mothers to the Posyandu schedule, we standardized all Posyandu and desa names (lowercase, trimmed spaces, removed special characters but kept numbers, because names like melati 3 are valid). After cleaning, we found that only 178 of 566 mothers actually have a Posyandu name, while 388 mothers have the Posyandu field empty. This means that the absolute maximum number of mothers who can ever be matched to a monthly schedule is 178, because the remaining 388 mothers have no Posyandu information at all. After joining the cleaned intervention dataset with the cleaned schedule using desa + posyandu, we classified mothers with valid November/December dates as “known schedule” and those without matches as “unknown.” The final result—186 known vs 380 unknown—fits logically with the fact that only mothers with a Posyandu name can be matched to a schedule.
+```{r}
+#Check
+#table(Final_intervention_pop$Posyandu == "")
+#table(Final_intervention_pop_clean$Posyandu== "")
+
+#Clean to match with posyandu schedule dataset - population
+Final_intervention_pop_clean <- Final_intervention_pop %>%
+  mutate(
+    posyandu = str_to_lower(Posyandu),
+    posyandu = str_squish(posyandu),
+    posyandu = str_replace_all(posyandu, "[^a-z0-9 ]", ""),
+    
+    desa = str_to_lower(desa),
+    desa = str_squish(desa)
+  )
+
+schedule_all_clean <- schedule_all %>%
+  mutate(
+    posyandu = str_to_lower(posyandu),
+    posyandu = str_squish(posyandu),
+    posyandu = str_replace_all(posyandu, "[^a-z0-9 ]", ""),
+    
+    desa = str_to_lower(desa),
+    desa = str_squish(desa)
+  )
+
+#Final Dataset with Schedule Posyandu
+rm(intervention_with_schedule)
+intervention_with_schedule <- Final_intervention_pop_clean %>%
+  left_join(schedule_all_clean, by = c("desa", "posyandu"))
+
+intervention_with_schedule <- intervention_with_schedule %>%
+  mutate(
+    schedule_status = ifelse(
+      !is.na(posyandu_nov) | !is.na(posyandu_dec),
+      "known", "unknown"
+    )
+  )
+
+table(intervention_with_schedule$schedule_status)
+```
+
+#STEP 3. Broadcast Log Processing (Qiscus) - Data called Start from here
+STEP 3. Broadcast Log Processing (Qiscus)
+```{r}
+# 1. Set working directory (where the CSV file is saved)
+getwd ()
+setwd("/Users/nisawahyuni/Documents/OUCRU/7th Deliverable - Data Analysis/ANC Analysis by Nisa")
+
+# 2. Read the CSV file
+broadcast_log <- read.csv("121125_ANC Reminder First Attempt.csv") #Adjusted based on file name (ANC Reminder)
+
+broadcast_posyandu <- read.csv("19112025_Posyandu_Reminder_Raw_Qiscuss.csv") #DatasetQISCUSpadatanggaldiambil (Eg. 16112025) #Adjusted based on file name (Posyandu Known Reminder)
+
+# 3. View the first few rows
+head(broadcast_log)
+summary(broadcast_log)
+head(broadcast_posyandu)
+summary(broadcast_posyandu)
+# 4. Check the structure of the dataset
+str(broadcast_log)
+str(broadcast_posyandu)
+library(dplyr)
+
+#Rename Phone Number coloumn
+library(dplyr)
+
+broadcast_log <- broadcast_log %>%
+  rename(phone_number = Phone.Number)
+
+broadcast_posyandu <- broadcast_posyandu %>%
+  rename(phone_number = Phone.Number)
+```
+
+STEP 4. Grouping Qiscus and Intervention Group (from unique phone number)
+#STEP 4. Grouping Qiscus and Intervention Group (from unique phone number)
+4A. ANC: ANC REMINDER DATASET
+##4A. ANC: ANC REMINDER DATASET
+```{r}
+#Match Broadcast and Intervention Group by Phone Number
+broadcast_log <- broadcast_log %>%
+  mutate(phone_number = as.character(phone_number))
+
+Final_intervention_pop <- Final_intervention_pop %>%
+  mutate(phone_number = as.character(phone_number))
+
+intervention_delivery_log <- broadcast_log %>%
+  left_join(Final_intervention_pop, by = "phone_number")
+
+names(intervention_delivery_log)
+nrow(intervention_delivery_log)
+
+sum(!is.na(intervention_delivery_log$cluster_group))
+
+#View The Matched Subset Only
+intervention_delivery_matched <- intervention_delivery_log %>%
+  filter(!is.na(cluster_group))
+
+nrow(intervention_delivery_matched)
+
+```
+4B. POSYANDU: POSYANDU REMINDER DATASET
+##4B. POSYANDU: POSYANDU REMINDER DATASET
+```{r}
+#Match Broadcast and Intervention Group by Phone Number
+broadcast_posyandu <- broadcast_posyandu %>%
+  mutate(phone_number = as.character(phone_number))
+
+Final_intervention_pop <- Final_intervention_pop %>%
+  mutate(phone_number = as.character(phone_number))
+
+#Match Dataset Posyandu ALL Qiscus (still mixed campaign) - List Intervention
+intervention_posyandu_log <- broadcast_posyandu %>%
+  left_join(Final_intervention_pop, by = "phone_number")
+
+names(intervention_posyandu_log )
+nrow(intervention_posyandu_log )
+
+sum(!is.na(intervention_posyandu_log$cluster_group))
+
+#View The Matched Subset Only
+intervention_posyandu_matched <- intervention_posyandu_log  %>%
+  filter(!is.na(cluster_group)) #yg matched with data intervension
+
+nrow(intervention_posyandu_matched)
+
+```
+
+STEP 5. Message Campaign Delivery
+#STEP 5. Message Campaign Delivery
+5A. ANC: ANC Reminder (One time Campaign based on HPHT the time delivery message - 12 November 2025)
+## 5A. ANC: ANC Reminder (One time Campaign based on HPHT the time delivery message - 12 November 2025)
+```{r}
+# 1. Filter ANC templates
+anc_msgs <- intervention_delivery_matched %>%
+  filter(Template.Name %in% c("anc_with_posy_10112025", "anc_without_posy_10112025","anc_without_posy_10112025_2")) %>%
+  distinct(phone_number, .keep_all = TRUE)   # keep unique mother only
+
+# 2. Combine with all intervention population
+anc_qc <- Final_intervention_pop %>%
+  left_join(anc_msgs %>% select(phone_number, Status, Replied),
+            by = "phone_number") %>%
+  mutate(
+    received_campaign = !is.na(Status),
+    final_status = if_else(received_campaign, Status, "Unreached"),
+    replied_flag = if_else(received_campaign, Replied, NA_character_)
+  )
+
+# 3. Summary
+table(anc_qc$received_campaign)
+table(anc_qc$final_status)
+
+```
+
+5B. POSYANDU: Daily Posyandu Reminder QC (D-2 of Posyandu Schedule - Known Posyandu Schedule)
+##5B. POSYANDU: Daily Posyandu Reminder QC (D-2 of Posyandu Schedule - Known Posyandu Schedule)
+```{r}
+#SETUP
+reminder_date <- as.Date("2025-11-19") #adjusted based on data daily
+
+schedule_for_this_reminder <- schedule_all_clean %>%
+  filter(
+    posyandu_nov == reminder_date + 2 |
+    posyandu_dec == reminder_date + 2
+  )
+
+mothers_should_receive <- Final_intervention_pop_clean %>%
+  inner_join(schedule_for_this_reminder, by = c("desa", "posyandu"))
+
+
+#QISCUS MESSAGING TO DAILY POSYANDU REMINDER
+posy_template <- "soc_science_posyandu_known"
+
+posy_msgs <- intervention_posyandu_matched %>%
+  filter(Template.Name == posy_template) %>%
+  mutate(
+    Sent.At = lubridate::mdy_hm(Sent.At),
+    send_date = as.Date(Sent.At)
+  )
+
+today_date <- as.Date("2025-11-19")
+
+posy_today <- posy_msgs %>%
+  filter(send_date == today_date) %>%
+  distinct(phone_number, .keep_all = TRUE)
+
+
+#DAILY REPORT
+
+qc_check <- mothers_should_receive %>%
+  left_join(
+    posy_today %>% select(phone_number, Status, Replied),
+    by = "phone_number"
+  ) %>%
+  mutate(
+    received_campaign = !is.na(Status),
+    final_status = case_when(
+      Status == "Read"      ~ "Read",
+      Status == "Delivered" ~ "Delivered",
+      Status == "Sent"      ~ "Sent",
+      Status == "Failed"    ~ "Failed",
+      TRUE                  ~ "Unreached"   # NA → no message
+    ),
+    replied_flag = case_when(
+      final_status == "Read" & Replied == "true"  ~ "true",
+      final_status == "Read" & Replied == "false" ~ "false",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+STEP 6. Table Visualization
+#STEP 6. Table Visualization
+6A. ANC: ANC Campaign Result based on HPHT (12112025)
+##6A. ANC: ANC Campaign Result based on HPHT (12112025)
+```{r}
+## --- 5A. ANC CAMPAIGN RESULT (UPDATED FOR 11 NODE SANKEY) ---
+
+library(dplyr)
+library(tibble)
+
+df <- anc_qc   # base dataset
+
+# Core counts
+total_intervention <- nrow(df)
+reached     <- sum(df$received_campaign)
+unreached   <- sum(!df$received_campaign)
+
+# Status counts among reached only
+status_summary <- df %>%
+  filter(received_campaign) %>%
+  count(final_status, name = "count")
+
+sent        <- status_summary %>% filter(final_status == "Sent") %>% pull(count)
+failed      <- status_summary %>% filter(final_status == "Failed") %>% pull(count)
+delivered   <- status_summary %>% filter(final_status == "Delivered") %>% pull(count)
+read        <- status_summary %>% filter(final_status == "Read") %>% pull(count)
+
+# Derived metrics
+sent_total        <- sent + delivered + read
+delivered_total   <- delivered + read
+not_delivered     <- sent_total - delivered_total   # NEW
+not_read          <- delivered_total - read         # NEW
+
+replied      <- df %>% filter(final_status == "Read", replied_flag == "true")  %>% nrow()
+not_replied  <- df %>% filter(final_status == "Read", replied_flag == "false") %>% nrow()
+
+# Build full flow table with 11 nodes
+anc_flow_table <- tibble(
+  Level = c(1,2,2,3,3,4,4,5,5,6,6),
+  Stage = c(
+    "All Intervention",
+    "Reached", "Unreached",
+    "Sent", "Failed",
+    "Delivered", "Not Delivered",   # NEW
+    "Read", "Not Read",             # NEW
+    "Replied", "Not Replied"
+  ),
+  Count = c(
+    total_intervention,
+    reached, unreached,
+    sent_total, failed,
+    delivered_total, not_delivered,
+    read, not_read,
+    replied, not_replied
+  )
+) %>%
+  mutate(
+    Percent_Total = round(Count / total_intervention * 100, 1),
+    Percent_Reached = case_when(
+      Stage == "All Intervention" ~ NA_real_,
+      TRUE ~ round(Count / reached * 100, 1)
+    )
+  )
+
+anc_flow_table
+```
+6B. POSYANDU: Daily Posyandu Campaign Result
+##6B. POSYANDU: Daily Posyandu Campaign Result
+```{r}
+library(dplyr)
+library(tibble)
+safe_pull <- function(df, col) {
+  if (nrow(df) == 0) return(0)
+  return(df[[col]])
+}
+
+df <- qc_check
+
+# Core counts
+total_intervention <- nrow(df)
+reached            <- sum(df$received_campaign)
+unreached          <- total_intervention - reached
+
+# Status counts among reached only
+status_summary <- df %>%
+  filter(received_campaign) %>%
+  count(final_status, name = "count")
+
+sent      <- safe_pull(status_summary %>% filter(final_status == "Sent"), "count")
+failed    <- safe_pull(status_summary %>% filter(final_status == "Failed"), "count")
+delivered <- safe_pull(status_summary %>% filter(final_status == "Delivered"), "count")
+read      <- safe_pull(status_summary %>% filter(final_status == "Read"), "count")
+
+
+# Derived
+sent_total       <- sent + delivered + read
+delivered_total  <- delivered + read
+not_delivered    <- sent_total - delivered_total
+not_read         <- delivered_total - read
+
+replied      <- df %>% filter(final_status == "Read", replied_flag == "true")  %>% nrow()
+not_replied  <- df %>% filter(final_status == "Read", replied_flag == "false") %>% nrow()
+
+#after
+library(tibble)
+posyandu_flow_table <- tibble(
+  Level = c(1,2,2,3,3,4,4,5,5,6,6),
+  Stage = c(
+    "All Intervention",
+    "Reached", "Unreached",
+    "Sent", "Failed",
+    "Delivered", "Not Delivered",
+    "Read", "Not Read",
+    "Replied", "Not Replied"
+  ),
+  Count = c(
+    total_intervention,
+    reached, unreached,
+    sent_total, failed,
+    delivered_total, not_delivered,
+    read, not_read,
+    replied, not_replied
+  )
+) %>%
+  mutate(
+    Percent_Total = round(Count / total_intervention * 100, 1),
+    Percent_Reached = ifelse(
+      Stage %in% c("Reached", "Unreached"),
+      NA,
+      round(Count / reached * 100, 1)
+    )
+  )
+
+posyandu_flow_table
+
+```
+
+Step 7. Sankey Diagram Visualization
+#Step 7. Sankey Diagram Visualization (Note: Applied both just change the object name)
+#7A. ANC: Extract Data from table (ANC)
+```{r}
+# Extract counts from ANC flow table
+all_intervention <- anc_flow_table %>% filter(Stage == "All Intervention") %>% pull(Count)
+reached          <- anc_flow_table %>% filter(Stage == "Reached")         %>% pull(Count)
+unreached        <- anc_flow_table %>% filter(Stage == "Unreached")       %>% pull(Count)
+sent_total       <- anc_flow_table %>% filter(Stage == "Sent")            %>% pull(Count)
+failed           <- anc_flow_table %>% filter(Stage == "Failed")          %>% pull(Count)
+delivered_total  <- anc_flow_table %>% filter(Stage == "Delivered")       %>% pull(Count)
+not_delivered    <- anc_flow_table %>% filter(Stage == "Not Delivered")   %>% pull(Count)
+read             <- anc_flow_table %>% filter(Stage == "Read")            %>% pull(Count)
+not_read         <- anc_flow_table %>% filter(Stage == "Not Read")        %>% pull(Count)
+replied          <- anc_flow_table %>% filter(Stage == "Replied")         %>% pull(Count)
+not_replied      <- anc_flow_table %>% filter(Stage == "Not Replied")     %>% pull(Count)
+
+```
+
+### ANC: Create nodes and others
+```{r}
+calc_pct <- function(x) paste0(x, " (", round(100*x/all_intervention,1), "%)")
+
+nodes <- tibble(
+  name = c(
+    paste0("All Intervention\n", calc_pct(all_intervention)),  # 0
+    paste0("Reached\n", calc_pct(reached)),                    # 1
+    paste0("Unreached\n", calc_pct(unreached)),                # 2
+    paste0("Sent\n", calc_pct(sent_total)),                    # 3
+    paste0("Failed\n", calc_pct(failed)),                      # 4
+    paste0("Delivered\n", calc_pct(delivered_total)),          # 5
+    paste0("Not Delivered\n", calc_pct(not_delivered)),        # 6
+    paste0("Read\n", calc_pct(read)),                          # 7
+    paste0("Not Read\n", calc_pct(not_read)),                  # 8
+    paste0("Replied\n", calc_pct(replied)),                    # 9
+    paste0("Not Replied\n", calc_pct(not_replied))             # 10
+  )
+)
+
+links <- tibble(
+  source = c(
+    0, 0,      # All → Reached/Unreached
+    1, 1,      # Reached → Sent/Failed
+    3, 3,      # Sent → Delivered / Not Delivered
+    5, 5,      # Delivered → Read / Not Read
+    7, 7       # Read → Replied / Not Replied
+  ),
+  target = c(
+    1, 2,
+    3, 4,
+    5, 6,
+    7, 8,
+    9, 10
+  ),
+  value = c(
+    reached, unreached,
+    sent_total, failed,
+    delivered_total, not_delivered,
+    read, not_read,
+    replied, not_replied
+  )
+)
+```
+
+ANC: Sankey Plot
+##ANC: Sankey Plot
+```{r}
+library(networkD3)
+library(htmlwidgets)
+library(htmltools)
+
+links_df <- as.data.frame(links)
+nodes_df <- as.data.frame(nodes)
+
+library(networkD3)
+
+colourScale <- 'd3.scaleOrdinal()
+  .range(["#084B83", "#177EBA", "#59A5D8", "#A9D6E5", "#DCEFFF"]);
+'
+
+s <- sankeyNetwork(
+  Links = as.data.frame(links),
+  Nodes = as.data.frame(nodes),
+  Source = "source",
+  Target = "target",
+  Value  = "value",
+  NodeID = "name",
+  fontSize = 10,
+  nodeWidth = 10,
+  sinksRight = FALSE,
+  nodePadding = 30,
+  colourScale = colourScale # <<== PERBESAR JARAK VERTICAL 
+)
+
+# << PUT TITLE >>
+print(
+  tagList(
+    h3("ANC Reminder"), #Title - Date Adjusted
+    s
+  )
+)
+
+s
+```
+
+#7B. POSYANDU: Extract Data from table (Posyandu)
+```{r}
+# Extract counts from Posyandu flow table
+all_intervention <- posyandu_flow_table %>% filter(Stage == "All Intervention") %>% pull(Count)
+reached          <- posyandu_flow_table %>% filter(Stage == "Reached")         %>% pull(Count)
+unreached        <- posyandu_flow_table %>% filter(Stage == "Unreached")       %>% pull(Count)
+sent_total       <- posyandu_flow_table %>% filter(Stage == "Sent")            %>% pull(Count)
+failed           <- posyandu_flow_table %>% filter(Stage == "Failed")          %>% pull(Count)
+delivered_total  <- posyandu_flow_table %>% filter(Stage == "Delivered")       %>% pull(Count)
+not_delivered    <- posyandu_flow_table %>% filter(Stage == "Not Delivered")   %>% pull(Count)
+read             <- posyandu_flow_table %>% filter(Stage == "Read")            %>% pull(Count)
+not_read         <- posyandu_flow_table %>% filter(Stage == "Not Read")        %>% pull(Count)
+replied          <- posyandu_flow_table %>% filter(Stage == "Replied")         %>% pull(Count)
+not_replied      <- posyandu_flow_table %>% filter(Stage == "Not Replied")     %>% pull(Count)
+
+```
+
+###POSYANDU: Create nodes and others 
+```{r}
+calc_pct <- function(x) paste0(x, " (", round(100*x/all_intervention,1), "%)")
+
+nodes <- tibble(
+  name = c(
+    paste0("All Intervention\n", calc_pct(all_intervention)),  # 0
+    paste0("Reached\n", calc_pct(reached)),                    # 1
+    paste0("Unreached\n", calc_pct(unreached)),                # 2
+    paste0("Sent\n", calc_pct(sent_total)),                    # 3
+    paste0("Failed\n", calc_pct(failed)),                      # 4
+    paste0("Delivered\n", calc_pct(delivered_total)),          # 5
+    paste0("Not Delivered\n", calc_pct(not_delivered)),        # 6
+    paste0("Read\n", calc_pct(read)),                          # 7
+    paste0("Not Read\n", calc_pct(not_read)),                  # 8
+    paste0("Replied\n", calc_pct(replied)),                    # 9
+    paste0("Not Replied\n", calc_pct(not_replied))             # 10
+  )
+)
+
+links <- tibble(
+  source = c(
+    0, 0,      # All → Reached/Unreached
+    1, 1,      # Reached → Sent/Failed
+    3, 3,      # Sent → Delivered / Not Delivered
+    5, 5,      # Delivered → Read / Not Read
+    7, 7       # Read → Replied / Not Replied
+  ),
+  target = c(
+    1, 2,
+    3, 4,
+    5, 6,
+    7, 8,
+    9, 10
+  ),
+  value = c(
+    reached, unreached,
+    sent_total, failed,
+    delivered_total, not_delivered,
+    read, not_read,
+    replied, not_replied
+  )
+)
+```
+POSYANDU: Sankey Plot
+##POSYANDU: Sankey Plot
+```{r}
+library(networkD3)
+library(htmlwidgets)
+library(htmltools)
+
+links_df <- as.data.frame(links)
+nodes_df <- as.data.frame(nodes)
+
+library(networkD3)
+
+colourScale <- 'd3.scaleOrdinal()
+  .range(["#084B83", "#177EBA", "#59A5D8", "#A9D6E5", "#DCEFFF"]);
+'
+
+
+
+s <- sankeyNetwork(
+  Links = as.data.frame(links),
+  Nodes = as.data.frame(nodes),
+  Source = "source",
+  Target = "target",
+  Value  = "value",
+  NodeID = "name",
+  fontSize = 10,
+  nodeWidth = 10,
+  sinksRight = FALSE,
+  nodePadding = 60,
+  colourScale = colourScale, # <<== PERBESAR JARAK VERTICAL 
+  height = 600,   
+  width  = 1100   
+)
+
+# << PUT TITLE >>
+print(
+  tagList(
+    h3("Daily Posyandu Reminder — 19 Nov 2025"), #Title - Date Adjusted
+    s
+  )
+)
+
+s
+```
+
+#2ND OBJECTIVE: BASELINE ANALYSIS
+##STEP 1. DATA PREPARATION
+```{r}
+
+Purbalingga_group <- Purbalingga_group %>%
+  mutate(district = "Purbalingga")
+
+Lombar_group <- Lombar_group %>%
+  mutate(district = "Lombok Barat")
+
+# Combine both districts into baseline_full
+baseline_full <- bind_rows(Purbalingga_group, Lombar_group)
+
+# Standardize cluster group
+baseline_full <- baseline_full %>%
+  mutate(cluster_group = str_to_lower(cluster_group))
+
+names(baseline_full)
+
+
+# Create key variables
+baseline_full <- baseline_full %>%
+  mutate(
+    ga_at_registration = days_since_hpht / 7,
+    intervention = case_when(
+      cluster_group == "intervention" ~ "Intervention",
+      cluster_group == "control"      ~ "Control",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  mutate(intervention = factor(intervention, levels = c("Control", "Intervention")))
+
+```
+
+#STEP 2.Baseline Characteristics
+```{r}
+library(gtsummary)
+library(gt)
+
+baseline_table <- baseline_full %>%
+  mutate(
+    posyandu_available = ifelse(Posyandu == "" | is.na(Posyandu),
+                                "No", "Yes")
+  ) %>%
+  select(
+    intervention,
+    ga_at_registration,
+    days_since_hpht,
+    category,
+    district,
+    posyandu_available
+  ) %>%
+  tbl_summary(
+    by = intervention,
+    statistic = list(
+      all_continuous() ~ "{mean} ± {sd}",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    missing = "no"
+  ) %>%
+  add_p() %>%
+  modify_header(label = "**Variable**") %>%
+  modify_caption("**Table 1. Baseline characteristics of control vs intervention**")
+
+baseline_table
+
+```
+
+#STEP 3: Logistic Regression with Puskesmas as Random Effect
+Goal: check whether randomization produced balance → so test whether intervention is associated with baseline characteristics.
+```{r}
+library(lme4)
+library(broom)
+
+model_logistic <- glm(
+  intervention ~ ga_at_registration + category,
+  data = baseline_full,
+  family = binomial
+)
+summary(model_logistic )
+
+
+```
+
+
+#STEP 6: Visualizations
+##Gestational Age at Registration
+```{r}
+ggplot(baseline_full, aes(x=ga_at_registration, fill=cluster_group)) +
+  geom_density(alpha=.4) +
+  labs(title="GA at Registration: Intervention vs Control")
+```
+
+## Trimester Group (barplot)
+```{r}
+ggplot(baseline_full, aes(x=category, fill=cluster_group)) +
+  geom_bar(position="fill") +
+  scale_y_continuous(labels=scales::percent) +
+  labs(title="Pregnancy Group Distribution (%)")
+
+```
+
+#Final Output Summary Baseline Section
+Baseline characteristics between the intervention and control groups were well balanced across all key demographic and maternal indicators. Both groups registered at similar gestational ages (23 ± 9 weeks) and had comparable trimester distributions. District proportions were evenly split due to puskesmas-level stratification. No significant differences were detected for any measured variable.
+
